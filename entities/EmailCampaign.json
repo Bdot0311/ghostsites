@@ -1,0 +1,46 @@
+{
+  "type": "object",
+  "properties": {
+    "business_id": {
+      "type": "string"
+    },
+    "site_id": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "body": {
+      "type": "string"
+    },
+    "sent_at": {
+      "type": "string"
+    },
+    "opened_at": {
+      "type": "string"
+    },
+    "clicked_at": {
+      "type": "string"
+    },
+    "replied_at": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "sent",
+        "opened",
+        "clicked",
+        "replied",
+        "converted",
+        "unsubscribed"
+      ]
+    },
+    "send_attempts": {
+      "type": "number"
+    }
+  },
+  "required": [],
+  "name": "EmailCampaign"
+}

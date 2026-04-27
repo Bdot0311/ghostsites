@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string"
+    },
+    "city": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "scraping",
+        "analyzing",
+        "generating",
+        "done",
+        "error"
+      ]
+    },
+    "businesses_found": {
+      "type": "number"
+    },
+    "sites_generated": {
+      "type": "number"
+    },
+    "emails_sent": {
+      "type": "number"
+    },
+    "error_message": {
+      "type": "string"
+    }
+  },
+  "required": [],
+  "name": "Campaign"
+}

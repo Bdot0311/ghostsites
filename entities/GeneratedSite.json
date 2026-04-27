@@ -1,0 +1,64 @@
+{
+  "type": "object",
+  "properties": {
+    "business_id": {
+      "type": "string"
+    },
+    "subdomain_url": {
+      "type": "string"
+    },
+    "full_html": {
+      "type": "string"
+    },
+    "design_archetype": {
+      "type": "string"
+    },
+    "color_palette_id": {
+      "type": "number"
+    },
+    "typography_pair_id": {
+      "type": "number"
+    },
+    "layout_variant": {
+      "type": "string"
+    },
+    "section_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "micro_interactions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "imagery_treatment": {
+      "type": "string"
+    },
+    "design_fingerprint": {
+      "type": "string"
+    },
+    "hero_copy": {
+      "type": "string"
+    },
+    "about_copy": {
+      "type": "string"
+    },
+    "services_copy": {
+      "type": "string"
+    },
+    "cta_copy": {
+      "type": "string"
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "view_count": {
+      "type": "number"
+    }
+  },
+  "required": [],
+  "name": "GeneratedSite"
+}
