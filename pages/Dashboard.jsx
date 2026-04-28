@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Business, GeneratedSite, EmailCampaign, Campaign } from "@/api/entities";
 import { SendEmail } from "@/api/integrations";
-import { scrapeLeads, analyzePersonality, generateSite, writeEmail } from "@/api/backendFunctions";
+import { base44 } from "@/api/base44Client";
 
 const STATUS_COLORS = {
   scraped: "bg-gray-100 text-gray-700",
@@ -20,6 +20,15 @@ const STATUS_ICONS = {
   replied: "💬",
   converted: "🎉",
 };
+
+async function callFn(name, payload) {
+  try {
+    const result = await base44.functions.invoke(name, payload);
+    return result?.data ?? result;
+  } catch (e) {
+    return { error: e.message };
+  }
+}
 
 export default function Dashboard() {
   const [tab, setTab] = useState("leads");
@@ -80,16 +89,16 @@ export default function Dashboard() {
 
       log(`🔍 Scraping Google Maps for "${campaignForm.category} in ${campaignForm.city}"...`);
 
-      const scrapeRes = await scrapeLeads({
+      const scrapeRes = await callFn("scrapeLeads", {
         city: campaignForm.city,
         category: campaignForm.category,
         campaign_id: campaign.id,
       });
 
-      if (scrapeRes.error) throw new Error(scrapeRes.error);
+      if (scrapeRes?.error) throw new Error(scrapeRes.error);
 
-      const saved = scrapeRes.saved || 0;
-      log(`✅ ${scrapeRes.found} total found · ${scrapeRes.no_website} without websites · ${saved} new leads saved`);
+      const saved = scrapeRes?.saved || 0;
+      log(`✅ ${scrapeRes?.found || 0} found · ${scrapeRes?.no_website || 0} without websites · ${saved} new leads saved`);
 
       if (saved === 0) {
         log(`ℹ️ No new businesses found. Try a different city or category.`);
@@ -107,20 +116,20 @@ export default function Dashboard() {
       let sitesGenerated = 0;
       for (const biz of (freshBiz || []).slice(0, 10)) {
         try {
-          log(`🧠 Analyzing: ${biz.name}...`);
-          const analyzeRes = await analyzePersonality({ business_id: biz.id });
-          if (analyzeRes.error) { log(`  ⚠️ Skipped — ${analyzeRes.error}`); continue; }
-          log(`  ✅ ${analyzeRes.profile?.design_archetype} — ${(analyzeRes.profile?.personality_keywords || []).slice(0, 3).join(", ")}`);
+          log(`🧠 ${biz.name}...`);
+          const analyzeRes = await callFn("analyzePersonality", { business_id: biz.id });
+          if (analyzeRes?.error) { log(`  ⚠️ ${analyzeRes.error}`); continue; }
+          log(`  ✅ ${analyzeRes?.profile?.design_archetype} — ${(analyzeRes?.profile?.personality_keywords || []).slice(0, 3).join(", ")}`);
 
-          log(`  🎨 Generating site...`);
-          const siteRes = await generateSite({ business_id: biz.id });
-          if (siteRes.error) { log(`  ⚠️ Site failed — ${siteRes.error}`); continue; }
-          log(`  ✅ ${siteRes.layout} · ${siteRes.palette}`);
+          log(`  🎨 Building site...`);
+          const siteRes = await callFn("generateSite", { business_id: biz.id });
+          if (siteRes?.error) { log(`  ⚠️ ${siteRes.error}`); continue; }
+          log(`  ✅ ${siteRes?.layout} · ${siteRes?.palette}`);
 
           log(`  ✍️ Writing email...`);
-          const emailRes = await writeEmail({ business_id: biz.id });
-          if (emailRes.error) { log(`  ⚠️ Email failed — ${emailRes.error}`); continue; }
-          log(`  ✅ "${emailRes.subject}"`);
+          const emailRes = await callFn("writeEmail", { business_id: biz.id });
+          if (emailRes?.error) { log(`  ⚠️ ${emailRes.error}`); continue; }
+          log(`  ✅ "${emailRes?.subject}"`);
 
           sitesGenerated++;
           await loadData();
@@ -146,19 +155,19 @@ export default function Dashboard() {
     const log = (msg) => setRunLog(prev => [...prev, msg]);
     try {
       log(`🧠 Analyzing...`);
-      const analyzeRes = await analyzePersonality({ business_id: business.id });
-      if (analyzeRes.error) throw new Error(analyzeRes.error);
-      log(`✅ ${analyzeRes.profile?.design_archetype}`);
+      const analyzeRes = await callFn("analyzePersonality", { business_id: business.id });
+      if (analyzeRes?.error) throw new Error(analyzeRes.error);
+      log(`✅ ${analyzeRes?.profile?.design_archetype}`);
 
       log(`🎨 Generating site...`);
-      const siteRes = await generateSite({ business_id: business.id });
-      if (siteRes.error) throw new Error(siteRes.error);
-      log(`✅ ${siteRes.layout} · ${siteRes.palette}`);
+      const siteRes = await callFn("generateSite", { business_id: business.id });
+      if (siteRes?.error) throw new Error(siteRes.error);
+      log(`✅ ${siteRes?.layout} · ${siteRes?.palette}`);
 
       log(`✍️ Writing email...`);
-      const emailRes = await writeEmail({ business_id: business.id });
-      if (emailRes.error) throw new Error(emailRes.error);
-      log(`✅ "${emailRes.subject}"`);
+      const emailRes = await callFn("writeEmail", { business_id: business.id });
+      if (emailRes?.error) throw new Error(emailRes.error);
+      log(`✅ "${emailRes?.subject}"`);
 
       log(`🎉 Done!`);
       await loadData();
@@ -220,7 +229,6 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100" style={{ fontFamily: "Inter, sans-serif" }}>
-      {/* Header */}
       <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="text-2xl">👻</span>
@@ -235,7 +243,6 @@ export default function Dashboard() {
         </button>
       </header>
 
-      {/* Analytics Strip */}
       <div className="grid grid-cols-6 border-b border-gray-800">
         {[
           { label: "Sites Generated", value: totalSites, color: "text-blue-400" },
@@ -254,14 +261,12 @@ export default function Dashboard() {
 
       {varietyWarning && (
         <div className="bg-yellow-900/20 border-b border-yellow-800/50 px-6 py-2 text-xs text-yellow-400">
-          ⚠️ Design Variety Alert: <strong>{dominant[0]}</strong> used {dominant[1]}/10 recent sites. Next gen will diversify.
+          ⚠️ Design Variety Alert: <strong>{dominant[0]}</strong> used {dominant[1]}/10 recent sites.
         </div>
       )}
 
       <div className="flex" style={{ height: "calc(100vh - 152px)" }}>
-        {/* Left: Leads table */}
         <div className={`${selected ? "w-1/2 border-r border-gray-800" : "w-full"} flex flex-col overflow-hidden`}>
-          {/* Tabs */}
           <div className="flex border-b border-gray-800 px-6 gap-1">
             {[
               { id: "leads", label: "All Leads", count: businesses.length },
@@ -280,7 +285,6 @@ export default function Dashboard() {
             <AnalyticsPanel businesses={businesses} sites={sites} />
           ) : (
             <>
-              {/* Filter bar */}
               <div className="flex items-center gap-2 px-6 py-3 border-b border-gray-800 overflow-x-auto">
                 {["all","scraped","site_generated","email_sent","opened","replied","converted"].map(f => (
                   <button key={f} onClick={() => setFilter(f)}
@@ -291,7 +295,6 @@ export default function Dashboard() {
               </div>
 
               <div className="flex-1 overflow-y-auto">
-                {/* Pipeline log */}
                 {(running || runLog.length > 0) && (
                   <div className="bg-gray-900/80 border-b border-gray-800 px-6 py-4">
                     <div className="flex items-center gap-2 mb-2">
@@ -353,7 +356,6 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Right: Detail panel */}
         {selected && (
           <div className="w-1/2 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800 bg-gray-900/50">
@@ -379,21 +381,18 @@ export default function Dashboard() {
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* Site Preview */}
               {sites[selected.id] ? (
                 <div className="border-b border-gray-800">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-gray-900">
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="text-lime-400 font-mono font-semibold">{sites[selected.id].design_archetype}</span>
+                      <span className="text-lime-400 font-semibold">{sites[selected.id].design_archetype}</span>
                       <span className="text-gray-600">·</span>
                       <span className="text-gray-500">{sites[selected.id].layout_variant?.replace(/_/g, " ")}</span>
                     </div>
-                    <button
-                      onClick={() => {
-                        const blob = new Blob([sites[selected.id].full_html], { type: "text/html" });
-                        window.open(URL.createObjectURL(blob), "_blank");
-                      }}
-                      className="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded transition-colors">
+                    <button onClick={() => {
+                      const blob = new Blob([sites[selected.id].full_html], { type: "text/html" });
+                      window.open(URL.createObjectURL(blob), "_blank");
+                    }} className="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded">
                       Open full ↗
                     </button>
                   </div>
@@ -410,12 +409,10 @@ export default function Dashboard() {
               ) : (
                 <div className="px-6 py-10 text-center border-b border-gray-800 text-gray-600">
                   <p className="text-3xl mb-2">🌐</p>
-                  <p className="text-sm">No site yet</p>
-                  <p className="text-xs mt-1">Click "Run Pipeline" above</p>
+                  <p className="text-sm">No site yet — click "Run Pipeline"</p>
                 </div>
               )}
 
-              {/* Business Info */}
               <div className="px-6 py-4 border-b border-gray-800">
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Business Info</h3>
                 <div className="grid grid-cols-2 gap-2 text-sm">
@@ -437,14 +434,11 @@ export default function Dashboard() {
                       <div><span className="text-gray-500">Archetype:</span> <span className="text-gray-200">{selected.personality_profile.design_archetype}</span></div>
                       <div><span className="text-gray-500">Keywords:</span> <span className="text-gray-200">{(selected.personality_profile.personality_keywords || []).join(", ")}</span></div>
                       <div><span className="text-gray-500">Tone:</span> <span className="text-gray-200">{selected.personality_profile.tone_of_voice}</span></div>
-                      <div><span className="text-gray-500">Why they're different:</span> <span className="text-gray-200">{selected.personality_profile.key_differentiator}</span></div>
+                      <div><span className="text-gray-500">Differentiator:</span> <span className="text-gray-200">{selected.personality_profile.key_differentiator}</span></div>
                       {selected.personality_profile.best_review_quote && (
                         <div className="mt-2 italic text-gray-400 border-l-2 border-gray-700 pl-3">
                           "{selected.personality_profile.best_review_quote.text}" — {selected.personality_profile.best_review_quote.author}
                         </div>
-                      )}
-                      {(selected.personality_profile.avoid || []).length > 0 && (
-                        <div><span className="text-gray-500">Avoid:</span> <span className="text-red-400">{selected.personality_profile.avoid.join(", ")}</span></div>
                       )}
                     </div>
                   </div>
@@ -465,13 +459,12 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Email Draft */}
               <div className="px-6 py-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cold Email Draft</h3>
                   {emailCampaigns[selected.id] && !editEmail && (
                     <button onClick={() => setEditEmail({ ...emailCampaigns[selected.id] })}
-                      className="text-xs text-gray-500 hover:text-white px-2 py-1 bg-gray-800 rounded transition-colors">Edit</button>
+                      className="text-xs text-gray-500 hover:text-white px-2 py-1 bg-gray-800 rounded">Edit</button>
                   )}
                 </div>
 
@@ -490,9 +483,9 @@ export default function Dashboard() {
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => saveEmailDraft(emailCampaigns[selected.id].id, editEmail.subject, editEmail.body)}
-                          className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-sm py-2 rounded transition-colors">Save</button>
+                          className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-sm py-2 rounded">Save</button>
                         <button onClick={() => setEditEmail(null)}
-                          className="px-4 text-gray-500 hover:text-white text-sm py-2 rounded border border-gray-700 transition-colors">Cancel</button>
+                          className="px-4 text-gray-500 hover:text-white text-sm py-2 rounded border border-gray-700">Cancel</button>
                       </div>
                     </div>
                   ) : (
@@ -518,7 +511,7 @@ export default function Dashboard() {
                               }}
                             />
                             <button onClick={() => sendEmailToLead(selected, emailCampaigns[selected.id])} disabled={sending}
-                              className="w-full bg-lime-400 text-gray-900 py-2.5 rounded font-bold text-sm hover:bg-lime-300 disabled:opacity-50 transition-colors">
+                              className="w-full bg-lime-400 text-gray-900 py-2.5 rounded font-bold text-sm hover:bg-lime-300 disabled:opacity-50">
                               {sending ? "Sending..." : "Send Email →"}
                             </button>
                           </>
@@ -543,7 +536,6 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* New Campaign Modal */}
       {showNewCampaign && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-full max-w-md shadow-2xl">
@@ -551,7 +543,7 @@ export default function Dashboard() {
               <span className="text-3xl">👻</span>
               <div>
                 <h2 className="text-xl font-bold text-white">New Campaign</h2>
-                <p className="text-xs text-gray-500">Finds real listings on Google Maps · builds each site with Claude</p>
+                <p className="text-xs text-gray-500">Real Google Maps listings · sites built by Claude</p>
               </div>
             </div>
             <div className="space-y-4">
@@ -560,23 +552,23 @@ export default function Dashboard() {
                 <input type="text" placeholder="e.g. Brooklyn, Austin, Miami"
                   value={campaignForm.city} onChange={e => setCampaignForm(p => ({ ...p, city: e.target.value }))}
                   onKeyDown={e => e.key === "Enter" && startCampaign()}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-lime-400 transition-colors" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-lime-400" />
               </div>
               <div>
                 <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider block mb-2">Business Category</label>
                 <input type="text" placeholder="e.g. barbers, taco spots, auto shops"
                   value={campaignForm.category} onChange={e => setCampaignForm(p => ({ ...p, category: e.target.value }))}
                   onKeyDown={e => e.key === "Enter" && startCampaign()}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-lime-400 transition-colors" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-lime-400" />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={startCampaign} disabled={!campaignForm.city || !campaignForm.category || running}
-                className="flex-1 bg-lime-400 text-gray-900 py-3 rounded-xl font-bold hover:bg-lime-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                className="flex-1 bg-lime-400 text-gray-900 py-3 rounded-xl font-bold hover:bg-lime-300 disabled:opacity-50 disabled:cursor-not-allowed">
                 {running ? "Running..." : "Launch Campaign →"}
               </button>
               <button onClick={() => setShowNewCampaign(false)}
-                className="px-6 text-gray-400 hover:text-white border border-gray-700 rounded-xl transition-colors">Cancel</button>
+                className="px-6 text-gray-400 hover:text-white border border-gray-700 rounded-xl">Cancel</button>
             </div>
           </div>
         </div>
