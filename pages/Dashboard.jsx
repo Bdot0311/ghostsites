@@ -398,15 +398,14 @@ export default function Dashboard() {
                       <span className="text-gray-500">{sites[selected.id].layout_variant?.replace(/_/g, " ")}</span>
                     </div>
                     <button onClick={() => {
-                      const blob = new Blob([sites[selected.id].full_html], { type: "text/html" });
-                      window.open(URL.createObjectURL(blob), "_blank");
+                      window.open(sites[selected.id].full_html, "_blank");
                     }} className="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded">
                       Open full ↗
                     </button>
                   </div>
                   <div className="h-72 overflow-hidden bg-gray-800">
-                    <iframe srcDoc={sites[selected.id].full_html} className="w-full h-full border-0 pointer-events-none"
-                      title="Site Preview" sandbox="allow-same-origin" />
+                    <iframe src={sites[selected.id].full_html} className="w-full h-full border-0 pointer-events-none"
+                      title="Site Preview" />
                   </div>
                   <div className="px-4 py-2 bg-gray-900 flex flex-wrap gap-3 text-xs text-gray-500">
                     <span>Palette <span className="text-gray-300">#{sites[selected.id].color_palette_id}</span></span>
