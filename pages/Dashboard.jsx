@@ -24,8 +24,7 @@ const STATUS_ICONS = {
 };
 
 async function callFunction(name, payload) {
-  const res = await client.functions[name](payload);
-  return res;
+  return await client.functions[name](payload);
 }
 
 export default function Dashboard() {
@@ -68,83 +67,102 @@ export default function Dashboard() {
     setRunning(true);
     setRunLog([]);
     setShowNewCampaign(false);
-
     const log = (msg) => setRunLog(prev => [...prev, msg]);
 
     try {
-      log(`🔍 Searching for ${campaignForm.category} in ${campaignForm.city}...`);
-
-      // Create a demo business to run through the full pipeline
-      const sampleBusiness = await Business.create({
-        name: `${campaignForm.category.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} on ${campaignForm.city.split(' ')[0]}`,
-        category: campaignForm.category,
+      // Create campaign record
+      const campaign = await Campaign.create({
+        query: `${campaignForm.category} in ${campaignForm.city}`,
         city: campaignForm.city,
-        state: "NY",
-        address: `${Math.floor(Math.random() * 999) + 1} Main St`,
-        phone: `(${Math.floor(Math.random() * 900) + 100}) ${Math.floor(Math.random() * 900) + 100}-${Math.floor(Math.random() * 9000) + 1000}`,
-        email: "",
-        rating: parseFloat((4.2 + Math.random() * 0.7).toFixed(1)),
-        review_count: Math.floor(Math.random() * 150) + 20,
-        top_reviews: [
-          { author: "Maria S.", text: `Been coming here for years. Best ${campaignForm.category} in ${campaignForm.city} — no question. They remember your name, they remember what you like. Old school in the best way.`, rating: 5 },
-          { author: "James T.", text: "No nonsense. Gets it done right every single time. Not trying to upsell you or waste your time. Exactly what you want from a neighborhood spot.", rating: 5 },
-          { author: "Priya K.", text: "Quick, fair, and they actually care about the work. Found this place by accident and now I won't go anywhere else. That kind of place.", rating: 5 },
-          { author: "Dan M.", text: "Feels like stepping back in time — in a good way. Cash only, no frills, no attitude. Just the real thing.", rating: 4 },
-          { author: "Rosa L.", text: "My dad used to come here. Now I do. Some things you just don't mess with.", rating: 5 },
-        ],
-        photos: [],
-        hours: "Mon–Sat 9am–7pm, Sun 11am–5pm",
-        status: "scraped",
-        campaign_query: `${campaignForm.category} in ${campaignForm.city}`,
+        category: campaignForm.category,
+        status: "scraping",
+        businesses_found: 0,
+        sites_generated: 0,
+        emails_sent: 0,
       });
 
-      log(`✅ Found 1 business without a website`);
-      log(`🧠 Analyzing personality with Claude...`);
+      log(`🔍 Scraping Google Maps for "${campaignForm.category} in ${campaignForm.city}"...`);
 
-      const analyzeRes = await callFunction("analyzePersonality", { business_id: sampleBusiness.id });
-      if (analyzeRes.error) throw new Error(analyzeRes.error);
+      // Step 1: Real scrape via Google Places
+      const scrapeRes = await callFunction("scrapeLeads", {
+        city: campaignForm.city,
+        category: campaignForm.category,
+        campaign_id: campaign.id,
+      });
 
-      const profile = analyzeRes.profile;
-      log(`✅ Archetype: ${profile.design_archetype} — ${(profile.personality_keywords || []).join(", ")}`);
-      log(`🎨 Generating site with Claude...`);
+      if (scrapeRes.error) throw new Error(scrapeRes.error);
 
-      const siteRes = await callFunction("generateSite", { business_id: sampleBusiness.id });
-      if (siteRes.error) throw new Error(siteRes.error);
+      const found = scrapeRes.saved || 0;
+      log(`✅ Found ${scrapeRes.found} total · ${scrapeRes.no_website} without websites · ${found} new leads saved`);
 
-      log(`✅ Site generated — ${siteRes.layout} layout, ${siteRes.palette} palette`);
-      log(`✍️ Writing cold email with Claude...`);
+      if (found === 0) {
+        log(`ℹ️ No new businesses to process. Try a different city or category.`);
+        await Campaign.update(campaign.id, { status: "done" });
+        await loadData();
+        return;
+      }
 
-      const emailRes = await callFunction("writeEmail", { business_id: sampleBusiness.id });
-      if (emailRes.error) throw new Error(emailRes.error);
-
-      log(`✅ Email draft ready — "${emailRes.subject}"`);
-      log(`🎉 Done! Lead is ready in your dashboard.`);
-
+      // Step 2: Load freshly scraped businesses
       await loadData();
+      const freshBiz = await Business.filter({ campaign_query: `${campaignForm.category} in ${campaignForm.city}`, status: "scraped" });
+
+      let sitesGenerated = 0;
+      for (const biz of (freshBiz || []).slice(0, 10)) { // cap at 10 per run
+        try {
+          log(`🧠 Analyzing: ${biz.name}...`);
+          const analyzeRes = await callFunction("analyzePersonality", { business_id: biz.id });
+          if (analyzeRes.error) { log(`  ⚠️ Skipped — ${analyzeRes.error}`); continue; }
+          log(`  ✅ ${analyzeRes.profile.design_archetype} — ${(analyzeRes.profile.personality_keywords || []).slice(0, 3).join(", ")}`);
+
+          log(`  🎨 Generating site...`);
+          const siteRes = await callFunction("generateSite", { business_id: biz.id });
+          if (siteRes.error) { log(`  ⚠️ Site failed — ${siteRes.error}`); continue; }
+          log(`  ✅ ${siteRes.layout} · ${siteRes.palette}`);
+
+          log(`  ✍️ Writing email...`);
+          const emailRes = await callFunction("writeEmail", { business_id: biz.id });
+          if (emailRes.error) { log(`  ⚠️ Email failed — ${emailRes.error}`); continue; }
+          log(`  ✅ "${emailRes.subject}"`);
+
+          sitesGenerated++;
+          await loadData();
+        } catch (e) {
+          log(`  ❌ Error on ${biz.name}: ${e.message}`);
+        }
+      }
+
+      await Campaign.update(campaign.id, { status: "done", sites_generated: sitesGenerated });
+      log(`🎉 Campaign complete — ${sitesGenerated} sites generated, ${found} leads in dashboard`);
+      await loadData();
+
     } catch (err) {
-      log(`❌ Error: ${err.message}`);
+      log(`❌ ${err.message}`);
     } finally {
       setRunning(false);
     }
   }
 
   async function runFullPipeline(business) {
-    setRunLog([`🔄 Re-running pipeline for ${business.name}...`]);
+    setRunLog([`🔄 Running pipeline for ${business.name}...`]);
     setRunning(true);
     const log = (msg) => setRunLog(prev => [...prev, msg]);
     try {
       log(`🧠 Analyzing personality...`);
       const analyzeRes = await callFunction("analyzePersonality", { business_id: business.id });
       if (analyzeRes.error) throw new Error(analyzeRes.error);
-      log(`✅ Personality done`);
+      log(`✅ ${analyzeRes.profile.design_archetype} — ${(analyzeRes.profile.personality_keywords || []).join(", ")}`);
+
       log(`🎨 Generating site...`);
       const siteRes = await callFunction("generateSite", { business_id: business.id });
       if (siteRes.error) throw new Error(siteRes.error);
-      log(`✅ Site generated`);
+      log(`✅ ${siteRes.layout} · ${siteRes.palette}`);
+
       log(`✍️ Writing email...`);
       const emailRes = await callFunction("writeEmail", { business_id: business.id });
       if (emailRes.error) throw new Error(emailRes.error);
-      log(`✅ Done — "${emailRes.subject}"`);
+      log(`✅ "${emailRes.subject}"`);
+
+      log(`🎉 Done!`);
       await loadData();
     } catch (err) {
       log(`❌ ${err.message}`);
@@ -155,20 +173,13 @@ export default function Dashboard() {
 
   async function sendEmail(business, emailCampaign) {
     if (!business.email) {
-      alert("No email address for this business. Add one manually in the record.");
+      alert("No email address on file. Add one in the field below.");
       return;
     }
     setSending(true);
     try {
-      await SendEmail({
-        to: business.email,
-        subject: emailCampaign.subject,
-        body: emailCampaign.body,
-      });
-      await EmailCampaign.update(emailCampaign.id, {
-        status: "sent",
-        sent_at: new Date().toISOString(),
-      });
+      await SendEmail({ to: business.email, subject: emailCampaign.subject, body: emailCampaign.body });
+      await EmailCampaign.update(emailCampaign.id, { status: "sent", sent_at: new Date().toISOString() });
       await Business.update(business.id, { status: "email_sent" });
       await loadData();
     } catch (err) {
@@ -194,10 +205,10 @@ export default function Dashboard() {
     ? hotLeads
     : filter === "all" ? businesses : businesses.filter(b => b.status === filter);
 
-  const totalSites = businesses.filter(b => ["site_generated", "email_sent", "opened", "replied", "converted"].includes(b.status)).length;
-  const totalSent = businesses.filter(b => ["email_sent", "opened", "replied", "converted"].includes(b.status)).length;
-  const totalOpened = businesses.filter(b => ["opened", "replied", "converted"].includes(b.status)).length;
-  const totalReplied = businesses.filter(b => ["replied", "converted"].includes(b.status)).length;
+  const totalSites = businesses.filter(b => ["site_generated","email_sent","opened","replied","converted"].includes(b.status)).length;
+  const totalSent = businesses.filter(b => ["email_sent","opened","replied","converted"].includes(b.status)).length;
+  const totalOpened = businesses.filter(b => ["opened","replied","converted"].includes(b.status)).length;
+  const totalReplied = businesses.filter(b => ["replied","converted"].includes(b.status)).length;
   const totalConverted = businesses.filter(b => b.status === "converted").length;
   const openRate = totalSent ? Math.round((totalOpened / totalSent) * 100) : 0;
   const replyRate = totalSent ? Math.round((totalReplied / totalSent) * 100) : 0;
@@ -210,20 +221,18 @@ export default function Dashboard() {
   const varietyWarning = dominant && dominant[1] >= 5;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div className="min-h-screen bg-gray-950 text-gray-100" style={{ fontFamily: "Inter, sans-serif" }}>
       {/* Header */}
       <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="text-2xl">👻</span>
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight">GhostSites</h1>
-            <p className="text-xs text-gray-500">Autonomous lead-gen + website engine · Claude</p>
+            <p className="text-xs text-gray-500">Autonomous lead-gen + website engine · Claude + Google Places</p>
           </div>
         </div>
-        <button
-          onClick={() => setShowNewCampaign(true)}
-          className="bg-lime-400 text-gray-900 px-4 py-2 rounded-lg text-sm font-bold hover:bg-lime-300 transition-colors"
-        >
+        <button onClick={() => setShowNewCampaign(true)}
+          className="bg-lime-400 text-gray-900 px-4 py-2 rounded-lg text-sm font-bold hover:bg-lime-300 transition-colors">
           + New Campaign
         </button>
       </header>
@@ -247,15 +256,13 @@ export default function Dashboard() {
 
       {varietyWarning && (
         <div className="bg-yellow-900/20 border-b border-yellow-800/50 px-6 py-2 text-xs text-yellow-400 flex items-center gap-2">
-          <span>⚠️</span>
-          <span>Design Variety Alert: Last 10 sites are over-using <strong>{dominant[0]}</strong> ({dominant[1]}/10). Next generation will force a different archetype.</span>
+          ⚠️ Design Variety Alert: <strong>{dominant[0]}</strong> used {dominant[1]}/10 recent sites. Next gen will force a different archetype.
         </div>
       )}
 
       <div className="flex" style={{ height: "calc(100vh - 152px)" }}>
         {/* Left: Leads table */}
-        <div className={`${selected ? "w-1/2 border-r border-gray-800" : "w-full"} flex flex-col overflow-hidden transition-all`}>
-          {/* Tabs */}
+        <div className={`${selected ? "w-1/2 border-r border-gray-800" : "w-full"} flex flex-col overflow-hidden`}>
           <div className="flex border-b border-gray-800 px-6 gap-1">
             {[
               { id: "leads", label: "All Leads", count: businesses.length },
@@ -274,9 +281,8 @@ export default function Dashboard() {
             <AnalyticsPanel businesses={businesses} sites={sites} />
           ) : (
             <>
-              {/* Filter bar */}
               <div className="flex items-center gap-2 px-6 py-3 border-b border-gray-800 overflow-x-auto">
-                {["all", "scraped", "site_generated", "email_sent", "opened", "replied", "converted"].map(f => (
+                {["all","scraped","site_generated","email_sent","opened","replied","converted"].map(f => (
                   <button key={f} onClick={() => setFilter(f)}
                     className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filter === f ? "bg-lime-400 text-gray-900" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
                     {f === "all" ? "All" : f.replace(/_/g, " ")}
@@ -288,11 +294,11 @@ export default function Dashboard() {
                 {/* Pipeline log */}
                 {(running || runLog.length > 0) && (
                   <div className="bg-gray-900/80 border-b border-gray-800 px-6 py-4">
-                    <div className="flex items-center gap-3 mb-2">
+                    <div className="flex items-center gap-2 mb-2">
                       {running && <div className="w-2 h-2 bg-lime-400 rounded-full animate-pulse" />}
-                      <span className="text-xs font-semibold text-lime-400">{running ? "Pipeline running..." : "Last run"}</span>
+                      <span className="text-xs font-semibold text-lime-400">{running ? "Pipeline running..." : "Last run complete"}</span>
                     </div>
-                    <div className="space-y-0.5">
+                    <div className="space-y-0.5 max-h-40 overflow-y-auto">
                       {runLog.map((msg, i) => (
                         <div key={i} className="text-xs text-gray-400 font-mono">{msg}</div>
                       ))}
@@ -304,24 +310,24 @@ export default function Dashboard() {
                   <div className="flex flex-col items-center justify-center h-64 text-gray-600">
                     <span className="text-5xl mb-4">👻</span>
                     <p className="text-sm font-medium">No leads yet</p>
-                    <p className="text-xs mt-1">Start a campaign to find businesses without websites</p>
+                    <p className="text-xs mt-1">Start a campaign — it'll pull real Google Maps listings</p>
                   </div>
                 ) : (
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-800">
                         {["Business", "Category", "Status", "Rating", "Email"].map(h => (
-                          <th key={h} className="text-left text-xs text-gray-500 px-6 py-3 font-medium first:pl-6">{h}</th>
+                          <th key={h} className="text-left text-xs text-gray-500 px-6 py-3 font-medium">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {filteredBusinesses.map(biz => {
                         const ec = emailCampaigns[biz.id];
-                        const isSelected = selected?.id === biz.id;
+                        const isSel = selected?.id === biz.id;
                         return (
-                          <tr key={biz.id} onClick={() => setSelected(isSelected ? null : biz)}
-                            className={`border-b border-gray-900 cursor-pointer transition-colors ${isSelected ? "bg-gray-900" : "hover:bg-gray-900/50"}`}>
+                          <tr key={biz.id} onClick={() => setSelected(isSel ? null : biz)}
+                            className={`border-b border-gray-900 cursor-pointer transition-colors ${isSel ? "bg-gray-900" : "hover:bg-gray-900/50"}`}>
                             <td className="px-6 py-3.5">
                               <div className="font-medium text-white text-sm">{biz.name}</div>
                               <div className="text-xs text-gray-500 mt-0.5">{biz.city}{biz.state ? `, ${biz.state}` : ""}</div>
@@ -349,7 +355,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Right: Split view */}
+        {/* Right: Detail panel */}
         {selected && (
           <div className="w-1/2 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800 bg-gray-900/50">
@@ -360,13 +366,13 @@ export default function Dashboard() {
               <div className="flex items-center gap-2">
                 {!sites[selected.id] && (
                   <button onClick={() => runFullPipeline(selected)} disabled={running}
-                    className="text-xs bg-lime-400 text-gray-900 px-3 py-1.5 rounded font-bold hover:bg-lime-300 disabled:opacity-50">
+                    className="text-xs bg-lime-400 text-gray-900 px-3 py-1.5 rounded font-bold hover:bg-lime-300 disabled:opacity-50 transition-colors">
                     Run Pipeline
                   </button>
                 )}
                 {selected.status === "replied" && (
                   <button onClick={() => markConverted(selected)}
-                    className="text-xs bg-emerald-500 text-white px-3 py-1.5 rounded font-bold hover:bg-emerald-400">
+                    className="text-xs bg-emerald-500 text-white px-3 py-1.5 rounded font-bold hover:bg-emerald-400 transition-colors">
                     Mark Converted
                   </button>
                 )}
@@ -379,31 +385,25 @@ export default function Dashboard() {
               {sites[selected.id] ? (
                 <div className="border-b border-gray-800">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-gray-900">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">🌐</span>
-                      <span className="text-xs font-mono text-lime-400">{sites[selected.id].design_archetype}</span>
-                      <span className="text-xs text-gray-600">·</span>
-                      <span className="text-xs text-gray-500">{sites[selected.id].layout_variant?.replace(/_/g, " ")}</span>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-lime-400 font-mono">{sites[selected.id].design_archetype}</span>
+                      <span className="text-gray-600">·</span>
+                      <span className="text-gray-500">{sites[selected.id].layout_variant?.replace(/_/g, " ")}</span>
                     </div>
                     <button
                       onClick={() => {
                         const blob = new Blob([sites[selected.id].full_html], { type: "text/html" });
                         window.open(URL.createObjectURL(blob), "_blank");
                       }}
-                      className="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded transition-colors"
-                    >
+                      className="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded transition-colors">
                       Open full ↗
                     </button>
                   </div>
-                  <div className="h-72 relative overflow-hidden bg-gray-800">
-                    <iframe
-                      srcDoc={sites[selected.id].full_html}
-                      className="w-full h-full border-0 pointer-events-none scale-100"
-                      title="Site Preview"
-                      sandbox="allow-same-origin"
-                    />
+                  <div className="h-72 overflow-hidden bg-gray-800">
+                    <iframe srcDoc={sites[selected.id].full_html} className="w-full h-full border-0 pointer-events-none"
+                      title="Site Preview" sandbox="allow-same-origin" />
                   </div>
-                  <div className="px-4 py-2.5 bg-gray-900 flex flex-wrap gap-3 text-xs text-gray-500">
+                  <div className="px-4 py-2 bg-gray-900 flex flex-wrap gap-3 text-xs text-gray-500">
                     <span>Palette <span className="text-gray-300">#{sites[selected.id].color_palette_id}</span></span>
                     <span>Font <span className="text-gray-300">#{sites[selected.id].typography_pair_id}</span></span>
                     <span>FX <span className="text-gray-300">{(sites[selected.id].micro_interactions || []).join(", ")}</span></span>
@@ -412,61 +412,69 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="px-6 py-10 text-center border-b border-gray-800 text-gray-600">
-                  <p className="text-2xl mb-2">🌐</p>
-                  <p className="text-sm">No site yet</p>
-                  <p className="text-xs mt-1">Click "Run Pipeline" to generate</p>
+                  <p className="text-3xl mb-2">🌐</p>
+                  <p className="text-sm">No site yet — click "Run Pipeline"</p>
                 </div>
               )}
 
-              {/* Business info */}
+              {/* Business Info */}
               <div className="px-6 py-4 border-b border-gray-800">
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Business Info</h3>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   {[
                     ["Phone", selected.phone],
-                    ["Email", selected.email || <span className="text-gray-600 italic">unknown</span>],
-                    ["Rating", selected.rating ? `⭐ ${selected.rating} (${selected.review_count} reviews)` : "—"],
-                    ["Hours", selected.hours],
+                    ["Rating", selected.rating ? `⭐ ${selected.rating} (${selected.review_count})` : "—"],
                     ["Address", selected.address],
+                    ["Hours", selected.hours],
                     ["Owner", selected.owner_name || "—"],
+                    ["Year est.", selected.year_established || "—"],
                   ].map(([k, v]) => (
-                    <div key={k}>
-                      <span className="text-gray-500">{k}: </span>
-                      <span className="text-gray-200">{v || "—"}</span>
-                    </div>
+                    <div key={k}><span className="text-gray-500">{k}: </span><span className="text-gray-200">{v || "—"}</span></div>
                   ))}
                 </div>
 
                 {selected.personality_profile && (
                   <div className="mt-4 p-3 bg-gray-900 rounded-lg border border-gray-800">
-                    <div className="text-xs text-lime-400 font-semibold mb-2">Claude's Personality Profile</div>
+                    <div className="text-xs text-lime-400 font-semibold mb-2">Claude's Personality Read</div>
                     <div className="space-y-1 text-xs">
                       <div><span className="text-gray-500">Archetype:</span> <span className="text-gray-200">{selected.personality_profile.design_archetype}</span></div>
                       <div><span className="text-gray-500">Keywords:</span> <span className="text-gray-200">{(selected.personality_profile.personality_keywords || []).join(", ")}</span></div>
                       <div><span className="text-gray-500">Tone:</span> <span className="text-gray-200">{selected.personality_profile.tone_of_voice}</span></div>
-                      <div><span className="text-gray-500">Key differentiator:</span> <span className="text-gray-200">{selected.personality_profile.key_differentiator}</span></div>
+                      <div><span className="text-gray-500">Why they're different:</span> <span className="text-gray-200">{selected.personality_profile.key_differentiator}</span></div>
                       {selected.personality_profile.best_review_quote && (
                         <div className="mt-2 italic text-gray-400 border-l-2 border-gray-700 pl-3">
                           "{selected.personality_profile.best_review_quote.text}" — {selected.personality_profile.best_review_quote.author}
                         </div>
                       )}
-                      {selected.personality_profile.avoid?.length > 0 && (
-                        <div className="mt-1"><span className="text-gray-500">Avoid:</span> <span className="text-red-400">{selected.personality_profile.avoid.join(", ")}</span></div>
+                      {(selected.personality_profile.avoid || []).length > 0 && (
+                        <div><span className="text-gray-500">Avoid:</span> <span className="text-red-400">{selected.personality_profile.avoid.join(", ")}</span></div>
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {(selected.top_reviews || []).length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-xs text-gray-500 mb-2">Top Reviews</div>
+                    <div className="space-y-2">
+                      {selected.top_reviews.slice(0, 3).map((r, i) => (
+                        <div key={i} className="text-xs text-gray-400 border-l-2 border-gray-700 pl-3">
+                          <span className="text-yellow-400">{"⭐".repeat(r.rating)} </span>
+                          "{r.text.slice(0, 120)}{r.text.length > 120 ? "..." : ""}" — {r.author}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Email draft */}
+              {/* Email Draft */}
               <div className="px-6 py-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Cold Email Draft</h3>
                   {emailCampaigns[selected.id] && !editEmail && (
                     <button onClick={() => setEditEmail({ ...emailCampaigns[selected.id] })}
-                      className="text-xs text-gray-500 hover:text-white px-2 py-1 bg-gray-800 rounded">
-                      Edit
-                    </button>
+                      className="text-xs text-gray-500 hover:text-white px-2 py-1 bg-gray-800 rounded transition-colors">Edit</button>
                   )}
                 </div>
 
@@ -498,25 +506,27 @@ export default function Dashboard() {
                       <div className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed font-mono bg-gray-950 rounded p-3">
                         {emailCampaigns[selected.id].body}
                       </div>
-                      <div className="mt-4 pt-3 border-t border-gray-800">
-                        {emailCampaigns[selected.id].status === "draft" ? (
-                          <div className="space-y-2">
-                            {!selected.email && (
-                              <input
-                                placeholder="Add recipient email address..."
-                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
-                                onChange={async (e) => {
+                      <div className="mt-4 pt-3 border-t border-gray-800 space-y-2">
+                        {emailCampaigns[selected.id].status === "draft" && (
+                          <>
+                            <input
+                              placeholder="Recipient email address..."
+                              defaultValue={selected.email || ""}
+                              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
+                              onBlur={async (e) => {
+                                if (e.target.value && e.target.value !== selected.email) {
                                   await Business.update(selected.id, { email: e.target.value });
                                   setSelected(prev => ({ ...prev, email: e.target.value }));
-                                }}
-                              />
-                            )}
+                                }
+                              }}
+                            />
                             <button onClick={() => sendEmail(selected, emailCampaigns[selected.id])} disabled={sending}
                               className="w-full bg-lime-400 text-gray-900 py-2.5 rounded font-bold text-sm hover:bg-lime-300 disabled:opacity-50 transition-colors">
                               {sending ? "Sending..." : "Send Email →"}
                             </button>
-                          </div>
-                        ) : (
+                          </>
+                        )}
+                        {emailCampaigns[selected.id].status !== "draft" && (
                           <div className="text-xs text-center text-gray-500">
                             Status: <span className="text-lime-400 font-medium">{emailCampaigns[selected.id].status}</span>
                             {emailCampaigns[selected.id].sent_at && ` · ${new Date(emailCampaigns[selected.id].sent_at).toLocaleDateString()}`}
@@ -540,14 +550,14 @@ export default function Dashboard() {
       {showNewCampaign && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 w-full max-w-md shadow-2xl">
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3 mb-6">
               <span className="text-3xl">👻</span>
               <div>
                 <h2 className="text-xl font-bold text-white">New Campaign</h2>
-                <p className="text-xs text-gray-500">Claude will analyze each business and build a custom site</p>
+                <p className="text-xs text-gray-500">Scrapes real Google Maps listings · builds sites with Claude</p>
               </div>
             </div>
-            <div className="space-y-4 mt-6">
+            <div className="space-y-4">
               <div>
                 <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider block mb-2">City</label>
                 <input type="text" placeholder="e.g. Brooklyn, Austin, Miami"
@@ -567,9 +577,7 @@ export default function Dashboard() {
                 {running ? "Running..." : "Launch Campaign →"}
               </button>
               <button onClick={() => setShowNewCampaign(false)}
-                className="px-6 text-gray-400 hover:text-white border border-gray-700 rounded-xl transition-colors">
-                Cancel
-              </button>
+                className="px-6 text-gray-400 hover:text-white border border-gray-700 rounded-xl transition-colors">Cancel</button>
             </div>
           </div>
         </div>
@@ -581,14 +589,12 @@ export default function Dashboard() {
 function AnalyticsPanel({ businesses, sites }) {
   const statusCounts = {};
   businesses.forEach(b => { statusCounts[b.status] = (statusCounts[b.status] || 0) + 1; });
-
   const archetypeCounts = {};
   const layoutCounts = {};
   Object.values(sites).forEach(s => {
     archetypeCounts[s.design_archetype] = (archetypeCounts[s.design_archetype] || 0) + 1;
     layoutCounts[s.layout_variant] = (layoutCounts[s.layout_variant] || 0) + 1;
   });
-
   const total = businesses.length || 1;
   const totalSites = Object.values(sites).length || 1;
 
@@ -601,14 +607,13 @@ function AnalyticsPanel({ businesses, sites }) {
             <div key={status} className="flex items-center gap-3">
               <div className="text-xs text-gray-400 w-36 capitalize">{status.replace(/_/g, " ")}</div>
               <div className="flex-1 bg-gray-800 rounded-full h-2">
-                <div className="bg-lime-400 h-2 rounded-full transition-all" style={{ width: `${Math.min((count / total) * 100, 100)}%` }} />
+                <div className="bg-lime-400 h-2 rounded-full" style={{ width: `${Math.min((count / total) * 100, 100)}%` }} />
               </div>
               <div className="text-xs text-white w-6 text-right font-mono">{count}</div>
             </div>
           ))}
         </div>
       </div>
-
       <div>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Design Archetype Mix</h3>
         <div className="space-y-3">
@@ -616,14 +621,13 @@ function AnalyticsPanel({ businesses, sites }) {
             <div key={arch} className="flex items-center gap-3">
               <div className="text-xs text-gray-400 w-36">{arch}</div>
               <div className="flex-1 bg-gray-800 rounded-full h-2">
-                <div className="bg-blue-400 h-2 rounded-full transition-all" style={{ width: `${Math.min((count / totalSites) * 100, 100)}%` }} />
+                <div className="bg-blue-400 h-2 rounded-full" style={{ width: `${Math.min((count / totalSites) * 100, 100)}%` }} />
               </div>
               <div className="text-xs text-white w-6 text-right font-mono">{count}</div>
             </div>
           ))}
         </div>
       </div>
-
       <div>
         <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Layout Variants</h3>
         <div className="grid grid-cols-2 gap-3">
