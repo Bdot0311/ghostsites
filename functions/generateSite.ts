@@ -113,8 +113,8 @@ Deno.serve(async (req) => {
     const microInteractions = validInteractions.slice(0, 2 + Math.floor(Math.random() * 2));
     const finalFingerprint = `${archetype}-${paletteId}-${typographyId}-${layout}-${Date.now()}`;
 
-    const apiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!apiKey) return Response.json({ error: 'OpenAI API key not configured' }, { status: 500 });
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!apiKey) return Response.json({ error: 'Anthropic API key not configured' }, { status: 500 });
 
     const profile = business.personality_profile;
     const reviewsText = (business.top_reviews || [])
@@ -169,13 +169,13 @@ Photos: ${(business.photos || []).slice(0, 3).join(", ") || "None — use type-f
 
 Generate the complete production-ready HTML now.`;
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-        temperature: 0.8,
+        model: "claude-opus-4-5",
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
         max_tokens: 8000,
       }),
     });
@@ -186,7 +186,7 @@ Generate the complete production-ready HTML now.`;
     }
 
     const data = await response.json();
-    let htmlContent = data.choices[0].message.content;
+    let htmlContent = data.content[0].text;
     htmlContent = htmlContent.replace(/^```html\n?/, "").replace(/\n?```$/, "");
 
     const subdomain = business.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);

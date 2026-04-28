@@ -1,25 +1,47 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 
+async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000): Promise<string> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-5',
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: user }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Anthropic error: ${err}`);
+  }
+  const data = await res.json();
+  return data.content[0].text;
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
-    const body = await req.json().catch(() => ({}));
-    const { business_id } = body;
+    const { business_id } = await req.json().catch(() => ({}));
     if (!business_id) return Response.json({ error: 'business_id required' }, { status: 400 });
 
     const businesses = await base44.asServiceRole.entities.Business.filter({ id: business_id });
-    if (!businesses || businesses.length === 0) return Response.json({ error: 'Business not found' }, { status: 404 });
+    if (!businesses?.length) return Response.json({ error: 'Business not found' }, { status: 404 });
     const business = businesses[0];
 
-    const apiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!apiKey) return Response.json({ error: 'OpenAI API key not configured' }, { status: 500 });
+    const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+    if (!apiKey) return Response.json({ error: 'Anthropic API key not configured' }, { status: 500 });
 
     const reviewsText = (business.top_reviews || [])
       .map((r: { author: string; text: string; rating: number }, i: number) =>
         `Review ${i + 1} (${r.rating}/5) by ${r.author}:\n"${r.text}"`)
-      .join("\n\n");
+      .join('\n\n');
 
-    const systemPrompt = `You are a senior brand strategist analyzing a local business to design a website that captures its true personality.
+    const system = `You are a senior brand strategist analyzing a local business to design a website that captures its true personality.
 
 ARCHETYPE MAPPING RULES:
 - Florists, salons, boutiques, spas → Soft Luxury or Editorial
@@ -47,35 +69,20 @@ OUTPUT — JSON ONLY, NO PREAMBLE:
   "avoid": ["3 things that would feel wrong for this business"]
 }`;
 
-    const userPrompt = `Business Name: ${business.name}
+    const user = `Business Name: ${business.name}
 Category: ${business.category}
-City: ${business.city}${business.state ? ", " + business.state : ""}
-Rating: ${business.rating || "N/A"} (${business.review_count || 0} reviews)
-Hours: ${business.hours || "N/A"}
-Year Established: ${business.year_established || "Unknown"}
+City: ${business.city}${business.state ? ', ' + business.state : ''}
+Rating: ${business.rating || 'N/A'} (${business.review_count || 0} reviews)
+Hours: ${business.hours || 'N/A'}
+Year Established: ${business.year_established || 'Unknown'}
 
 REVIEWS:
-${reviewsText || "No reviews available"}`;
+${reviewsText || 'No reviews available'}`;
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-        temperature: 0.7,
-        max_tokens: 1000,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      return Response.json({ error: `OpenAI error: ${err}` }, { status: 500 });
-    }
-
-    const data = await response.json();
-    const profile = JSON.parse(data.choices[0].message.content);
+    const text = await callClaude(apiKey, system, user, 1000);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON found in Claude response');
+    const profile = JSON.parse(jsonMatch[0]);
 
     await base44.asServiceRole.entities.Business.update(business_id, { personality_profile: profile });
 
