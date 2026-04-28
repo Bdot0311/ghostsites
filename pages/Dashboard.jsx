@@ -1,9 +1,7 @@
 import { useState, useEffect } from "react";
 import { Business, GeneratedSite, EmailCampaign, Campaign } from "@/api/entities";
 import { SendEmail } from "@/api/integrations";
-import { createClient } from "@/api/base44Client";
-
-const client = createClient();
+import { scrapeLeads, analyzePersonality, generateSite, writeEmail } from "@/api/backendFunctions";
 
 const STATUS_COLORS = {
   scraped: "bg-gray-100 text-gray-700",
@@ -22,10 +20,6 @@ const STATUS_ICONS = {
   replied: "💬",
   converted: "🎉",
 };
-
-async function callFunction(name, payload) {
-  return await client.functions[name](payload);
-}
 
 export default function Dashboard() {
   const [tab, setTab] = useState("leads");
@@ -48,18 +42,22 @@ export default function Dashboard() {
   }, []);
 
   async function loadData() {
-    const [biz, siteList, ecList] = await Promise.all([
-      Business.list(),
-      GeneratedSite.list(),
-      EmailCampaign.list(),
-    ]);
-    setBusinesses(biz || []);
-    const siteMap = {};
-    (siteList || []).forEach(s => { siteMap[s.business_id] = s; });
-    setSites(siteMap);
-    const ecMap = {};
-    (ecList || []).forEach(e => { ecMap[e.business_id] = e; });
-    setEmailCampaigns(ecMap);
+    try {
+      const [biz, siteList, ecList] = await Promise.all([
+        Business.list(),
+        GeneratedSite.list(),
+        EmailCampaign.list(),
+      ]);
+      setBusinesses(biz || []);
+      const siteMap = {};
+      (siteList || []).forEach(s => { siteMap[s.business_id] = s; });
+      setSites(siteMap);
+      const ecMap = {};
+      (ecList || []).forEach(e => { ecMap[e.business_id] = e; });
+      setEmailCampaigns(ecMap);
+    } catch (e) {
+      console.error("loadData error:", e);
+    }
   }
 
   async function startCampaign() {
@@ -70,7 +68,6 @@ export default function Dashboard() {
     const log = (msg) => setRunLog(prev => [...prev, msg]);
 
     try {
-      // Create campaign record
       const campaign = await Campaign.create({
         query: `${campaignForm.category} in ${campaignForm.city}`,
         city: campaignForm.city,
@@ -83,8 +80,7 @@ export default function Dashboard() {
 
       log(`🔍 Scraping Google Maps for "${campaignForm.category} in ${campaignForm.city}"...`);
 
-      // Step 1: Real scrape via Google Places
-      const scrapeRes = await callFunction("scrapeLeads", {
+      const scrapeRes = await scrapeLeads({
         city: campaignForm.city,
         category: campaignForm.category,
         campaign_id: campaign.id,
@@ -92,47 +88,49 @@ export default function Dashboard() {
 
       if (scrapeRes.error) throw new Error(scrapeRes.error);
 
-      const found = scrapeRes.saved || 0;
-      log(`✅ Found ${scrapeRes.found} total · ${scrapeRes.no_website} without websites · ${found} new leads saved`);
+      const saved = scrapeRes.saved || 0;
+      log(`✅ ${scrapeRes.found} total found · ${scrapeRes.no_website} without websites · ${saved} new leads saved`);
 
-      if (found === 0) {
-        log(`ℹ️ No new businesses to process. Try a different city or category.`);
+      if (saved === 0) {
+        log(`ℹ️ No new businesses found. Try a different city or category.`);
         await Campaign.update(campaign.id, { status: "done" });
         await loadData();
         return;
       }
 
-      // Step 2: Load freshly scraped businesses
       await loadData();
-      const freshBiz = await Business.filter({ campaign_query: `${campaignForm.category} in ${campaignForm.city}`, status: "scraped" });
+      const freshBiz = await Business.filter({
+        campaign_query: `${campaignForm.category} in ${campaignForm.city}`,
+        status: "scraped",
+      });
 
       let sitesGenerated = 0;
-      for (const biz of (freshBiz || []).slice(0, 10)) { // cap at 10 per run
+      for (const biz of (freshBiz || []).slice(0, 10)) {
         try {
           log(`🧠 Analyzing: ${biz.name}...`);
-          const analyzeRes = await callFunction("analyzePersonality", { business_id: biz.id });
+          const analyzeRes = await analyzePersonality({ business_id: biz.id });
           if (analyzeRes.error) { log(`  ⚠️ Skipped — ${analyzeRes.error}`); continue; }
-          log(`  ✅ ${analyzeRes.profile.design_archetype} — ${(analyzeRes.profile.personality_keywords || []).slice(0, 3).join(", ")}`);
+          log(`  ✅ ${analyzeRes.profile?.design_archetype} — ${(analyzeRes.profile?.personality_keywords || []).slice(0, 3).join(", ")}`);
 
           log(`  🎨 Generating site...`);
-          const siteRes = await callFunction("generateSite", { business_id: biz.id });
+          const siteRes = await generateSite({ business_id: biz.id });
           if (siteRes.error) { log(`  ⚠️ Site failed — ${siteRes.error}`); continue; }
           log(`  ✅ ${siteRes.layout} · ${siteRes.palette}`);
 
           log(`  ✍️ Writing email...`);
-          const emailRes = await callFunction("writeEmail", { business_id: biz.id });
+          const emailRes = await writeEmail({ business_id: biz.id });
           if (emailRes.error) { log(`  ⚠️ Email failed — ${emailRes.error}`); continue; }
           log(`  ✅ "${emailRes.subject}"`);
 
           sitesGenerated++;
           await loadData();
         } catch (e) {
-          log(`  ❌ Error on ${biz.name}: ${e.message}`);
+          log(`  ❌ ${biz.name}: ${e.message}`);
         }
       }
 
       await Campaign.update(campaign.id, { status: "done", sites_generated: sitesGenerated });
-      log(`🎉 Campaign complete — ${sitesGenerated} sites generated, ${found} leads in dashboard`);
+      log(`🎉 Done — ${sitesGenerated} sites built, ${saved} leads in your dashboard`);
       await loadData();
 
     } catch (err) {
@@ -147,18 +145,18 @@ export default function Dashboard() {
     setRunning(true);
     const log = (msg) => setRunLog(prev => [...prev, msg]);
     try {
-      log(`🧠 Analyzing personality...`);
-      const analyzeRes = await callFunction("analyzePersonality", { business_id: business.id });
+      log(`🧠 Analyzing...`);
+      const analyzeRes = await analyzePersonality({ business_id: business.id });
       if (analyzeRes.error) throw new Error(analyzeRes.error);
-      log(`✅ ${analyzeRes.profile.design_archetype} — ${(analyzeRes.profile.personality_keywords || []).join(", ")}`);
+      log(`✅ ${analyzeRes.profile?.design_archetype}`);
 
       log(`🎨 Generating site...`);
-      const siteRes = await callFunction("generateSite", { business_id: business.id });
+      const siteRes = await generateSite({ business_id: business.id });
       if (siteRes.error) throw new Error(siteRes.error);
       log(`✅ ${siteRes.layout} · ${siteRes.palette}`);
 
       log(`✍️ Writing email...`);
-      const emailRes = await callFunction("writeEmail", { business_id: business.id });
+      const emailRes = await writeEmail({ business_id: business.id });
       if (emailRes.error) throw new Error(emailRes.error);
       log(`✅ "${emailRes.subject}"`);
 
@@ -171,7 +169,7 @@ export default function Dashboard() {
     }
   }
 
-  async function sendEmail(business, emailCampaign) {
+  async function sendEmailToLead(business, emailCampaign) {
     if (!business.email) {
       alert("No email address on file. Add one in the field below.");
       return;
@@ -228,7 +226,7 @@ export default function Dashboard() {
           <span className="text-2xl">👻</span>
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight">GhostSites</h1>
-            <p className="text-xs text-gray-500">Autonomous lead-gen + website engine · Claude + Google Places</p>
+            <p className="text-xs text-gray-500">Autonomous lead-gen · Claude + Google Places</p>
           </div>
         </div>
         <button onClick={() => setShowNewCampaign(true)}
@@ -255,14 +253,15 @@ export default function Dashboard() {
       </div>
 
       {varietyWarning && (
-        <div className="bg-yellow-900/20 border-b border-yellow-800/50 px-6 py-2 text-xs text-yellow-400 flex items-center gap-2">
-          ⚠️ Design Variety Alert: <strong>{dominant[0]}</strong> used {dominant[1]}/10 recent sites. Next gen will force a different archetype.
+        <div className="bg-yellow-900/20 border-b border-yellow-800/50 px-6 py-2 text-xs text-yellow-400">
+          ⚠️ Design Variety Alert: <strong>{dominant[0]}</strong> used {dominant[1]}/10 recent sites. Next gen will diversify.
         </div>
       )}
 
       <div className="flex" style={{ height: "calc(100vh - 152px)" }}>
         {/* Left: Leads table */}
         <div className={`${selected ? "w-1/2 border-r border-gray-800" : "w-full"} flex flex-col overflow-hidden`}>
+          {/* Tabs */}
           <div className="flex border-b border-gray-800 px-6 gap-1">
             {[
               { id: "leads", label: "All Leads", count: businesses.length },
@@ -281,6 +280,7 @@ export default function Dashboard() {
             <AnalyticsPanel businesses={businesses} sites={sites} />
           ) : (
             <>
+              {/* Filter bar */}
               <div className="flex items-center gap-2 px-6 py-3 border-b border-gray-800 overflow-x-auto">
                 {["all","scraped","site_generated","email_sent","opened","replied","converted"].map(f => (
                   <button key={f} onClick={() => setFilter(f)}
@@ -299,9 +299,7 @@ export default function Dashboard() {
                       <span className="text-xs font-semibold text-lime-400">{running ? "Pipeline running..." : "Last run complete"}</span>
                     </div>
                     <div className="space-y-0.5 max-h-40 overflow-y-auto">
-                      {runLog.map((msg, i) => (
-                        <div key={i} className="text-xs text-gray-400 font-mono">{msg}</div>
-                      ))}
+                      {runLog.map((msg, i) => <div key={i} className="text-xs text-gray-400 font-mono">{msg}</div>)}
                     </div>
                   </div>
                 )}
@@ -310,7 +308,7 @@ export default function Dashboard() {
                   <div className="flex flex-col items-center justify-center h-64 text-gray-600">
                     <span className="text-5xl mb-4">👻</span>
                     <p className="text-sm font-medium">No leads yet</p>
-                    <p className="text-xs mt-1">Start a campaign — it'll pull real Google Maps listings</p>
+                    <p className="text-xs mt-1">Start a campaign to pull real Google Maps listings</p>
                   </div>
                 ) : (
                   <table className="w-full">
@@ -373,7 +371,7 @@ export default function Dashboard() {
                 {selected.status === "replied" && (
                   <button onClick={() => markConverted(selected)}
                     className="text-xs bg-emerald-500 text-white px-3 py-1.5 rounded font-bold hover:bg-emerald-400 transition-colors">
-                    Mark Converted
+                    Mark Converted ✓
                   </button>
                 )}
                 <button onClick={() => setSelected(null)} className="text-gray-500 hover:text-white text-xl w-8 h-8 flex items-center justify-center">×</button>
@@ -386,7 +384,7 @@ export default function Dashboard() {
                 <div className="border-b border-gray-800">
                   <div className="flex items-center justify-between px-4 py-2.5 bg-gray-900">
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="text-lime-400 font-mono">{sites[selected.id].design_archetype}</span>
+                      <span className="text-lime-400 font-mono font-semibold">{sites[selected.id].design_archetype}</span>
                       <span className="text-gray-600">·</span>
                       <span className="text-gray-500">{sites[selected.id].layout_variant?.replace(/_/g, " ")}</span>
                     </div>
@@ -407,13 +405,13 @@ export default function Dashboard() {
                     <span>Palette <span className="text-gray-300">#{sites[selected.id].color_palette_id}</span></span>
                     <span>Font <span className="text-gray-300">#{sites[selected.id].typography_pair_id}</span></span>
                     <span>FX <span className="text-gray-300">{(sites[selected.id].micro_interactions || []).join(", ")}</span></span>
-                    <span>Views <span className="text-gray-300">{sites[selected.id].view_count || 0}</span></span>
                   </div>
                 </div>
               ) : (
                 <div className="px-6 py-10 text-center border-b border-gray-800 text-gray-600">
                   <p className="text-3xl mb-2">🌐</p>
-                  <p className="text-sm">No site yet — click "Run Pipeline"</p>
+                  <p className="text-sm">No site yet</p>
+                  <p className="text-xs mt-1">Click "Run Pipeline" above</p>
                 </div>
               )}
 
@@ -427,7 +425,6 @@ export default function Dashboard() {
                     ["Address", selected.address],
                     ["Hours", selected.hours],
                     ["Owner", selected.owner_name || "—"],
-                    ["Year est.", selected.year_established || "—"],
                   ].map(([k, v]) => (
                     <div key={k}><span className="text-gray-500">{k}: </span><span className="text-gray-200">{v || "—"}</span></div>
                   ))}
@@ -435,7 +432,7 @@ export default function Dashboard() {
 
                 {selected.personality_profile && (
                   <div className="mt-4 p-3 bg-gray-900 rounded-lg border border-gray-800">
-                    <div className="text-xs text-lime-400 font-semibold mb-2">Claude's Personality Read</div>
+                    <div className="text-xs text-lime-400 font-semibold mb-2">Claude's Read</div>
                     <div className="space-y-1 text-xs">
                       <div><span className="text-gray-500">Archetype:</span> <span className="text-gray-200">{selected.personality_profile.design_archetype}</span></div>
                       <div><span className="text-gray-500">Keywords:</span> <span className="text-gray-200">{(selected.personality_profile.personality_keywords || []).join(", ")}</span></div>
@@ -459,8 +456,8 @@ export default function Dashboard() {
                     <div className="space-y-2">
                       {selected.top_reviews.slice(0, 3).map((r, i) => (
                         <div key={i} className="text-xs text-gray-400 border-l-2 border-gray-700 pl-3">
-                          <span className="text-yellow-400">{"⭐".repeat(r.rating)} </span>
-                          "{r.text.slice(0, 120)}{r.text.length > 120 ? "..." : ""}" — {r.author}
+                          <span className="text-yellow-400">{"⭐".repeat(Math.min(r.rating, 5))} </span>
+                          "{r.text?.slice(0, 120)}{r.text?.length > 120 ? "..." : ""}" — {r.author}
                         </div>
                       ))}
                     </div>
@@ -493,7 +490,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => saveEmailDraft(emailCampaigns[selected.id].id, editEmail.subject, editEmail.body)}
-                          className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-sm py-2 rounded transition-colors">Save Draft</button>
+                          className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-sm py-2 rounded transition-colors">Save</button>
                         <button onClick={() => setEditEmail(null)}
                           className="px-4 text-gray-500 hover:text-white text-sm py-2 rounded border border-gray-700 transition-colors">Cancel</button>
                       </div>
@@ -520,7 +517,7 @@ export default function Dashboard() {
                                 }
                               }}
                             />
-                            <button onClick={() => sendEmail(selected, emailCampaigns[selected.id])} disabled={sending}
+                            <button onClick={() => sendEmailToLead(selected, emailCampaigns[selected.id])} disabled={sending}
                               className="w-full bg-lime-400 text-gray-900 py-2.5 rounded font-bold text-sm hover:bg-lime-300 disabled:opacity-50 transition-colors">
                               {sending ? "Sending..." : "Send Email →"}
                             </button>
@@ -537,7 +534,7 @@ export default function Dashboard() {
                   )
                 ) : (
                   <div className="text-sm text-gray-600 text-center py-6 bg-gray-900 rounded-lg border border-gray-800">
-                    No email draft — run the pipeline first
+                    No email draft yet — run the pipeline first
                   </div>
                 )}
               </div>
@@ -554,7 +551,7 @@ export default function Dashboard() {
               <span className="text-3xl">👻</span>
               <div>
                 <h2 className="text-xl font-bold text-white">New Campaign</h2>
-                <p className="text-xs text-gray-500">Scrapes real Google Maps listings · builds sites with Claude</p>
+                <p className="text-xs text-gray-500">Finds real listings on Google Maps · builds each site with Claude</p>
               </div>
             </div>
             <div className="space-y-4">
@@ -562,12 +559,14 @@ export default function Dashboard() {
                 <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider block mb-2">City</label>
                 <input type="text" placeholder="e.g. Brooklyn, Austin, Miami"
                   value={campaignForm.city} onChange={e => setCampaignForm(p => ({ ...p, city: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && startCampaign()}
                   className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-lime-400 transition-colors" />
               </div>
               <div>
                 <label className="text-xs text-gray-400 font-semibold uppercase tracking-wider block mb-2">Business Category</label>
                 <input type="text" placeholder="e.g. barbers, taco spots, auto shops"
                   value={campaignForm.category} onChange={e => setCampaignForm(p => ({ ...p, category: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && startCampaign()}
                   className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-lime-400 transition-colors" />
               </div>
             </div>
