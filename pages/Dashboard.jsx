@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Business, GeneratedSite, EmailCampaign, Campaign } from "@/api/entities";
-import { SendEmail } from "@/api/integrations";
+
 import { base44 } from "@/api/base44Client";
 
 const STATUS_COLORS = {
@@ -180,15 +180,23 @@ export default function Dashboard() {
 
   async function sendEmailToLead(business, emailCampaign) {
     if (!business.email) {
-      alert("No email address on file. Add one in the field below.");
+      alert("No email address on file. Add one in the email field and save first.");
       return;
+    }
+    if (emailCampaign.status === "sent") {
+      if (!confirm("This email was already sent. Send again?")) return;
     }
     setSending(true);
     try {
-      await SendEmail({ to: business.email, subject: emailCampaign.subject, body: emailCampaign.body });
-      await EmailCampaign.update(emailCampaign.id, { status: "sent", sent_at: new Date().toISOString() });
+      const res = await callFn("sendEmail", {
+        campaign_id: emailCampaign.id,
+        to_email: business.email,
+        from_name: "Alex",
+      });
+      if (res?.error) throw new Error(res.error);
       await Business.update(business.id, { status: "email_sent" });
       await loadData();
+      alert(`✅ Sent to ${business.email}`);
     } catch (err) {
       alert("Send failed: " + err.message);
     } finally {
@@ -497,31 +505,27 @@ export default function Dashboard() {
                         {emailCampaigns[selected.id].body}
                       </div>
                       <div className="mt-4 pt-3 border-t border-gray-800 space-y-2">
-                        {emailCampaigns[selected.id].status === "draft" && (
-                          <>
-                            <input
-                              placeholder="Recipient email address..."
-                              defaultValue={selected.email || ""}
-                              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
-                              onBlur={async (e) => {
-                                if (e.target.value && e.target.value !== selected.email) {
-                                  await Business.update(selected.id, { email: e.target.value });
-                                  setSelected(prev => ({ ...prev, email: e.target.value }));
-                                }
-                              }}
-                            />
-                            <button onClick={() => sendEmailToLead(selected, emailCampaigns[selected.id])} disabled={sending}
-                              className="w-full bg-lime-400 text-gray-900 py-2.5 rounded font-bold text-sm hover:bg-lime-300 disabled:opacity-50">
-                              {sending ? "Sending..." : "Send Email →"}
-                            </button>
-                          </>
-                        )}
+                        <input
+                          placeholder="Recipient email address..."
+                          defaultValue={selected.email || ""}
+                          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
+                          onBlur={async (e) => {
+                            if (e.target.value && e.target.value !== selected.email) {
+                              await Business.update(selected.id, { email: e.target.value });
+                              setSelected(prev => ({ ...prev, email: e.target.value }));
+                            }
+                          }}
+                        />
                         {emailCampaigns[selected.id].status !== "draft" && (
-                          <div className="text-xs text-center text-gray-500">
+                          <div className="text-xs text-center text-gray-500 pb-1">
                             Status: <span className="text-lime-400 font-medium">{emailCampaigns[selected.id].status}</span>
-                            {emailCampaigns[selected.id].sent_at && ` · ${new Date(emailCampaigns[selected.id].sent_at).toLocaleDateString()}`}
+                            {emailCampaigns[selected.id].sent_at && ` · Sent ${new Date(emailCampaigns[selected.id].sent_at).toLocaleDateString()}`}
                           </div>
                         )}
+                        <button onClick={() => sendEmailToLead(selected, emailCampaigns[selected.id])} disabled={sending}
+                          className="w-full bg-lime-400 text-gray-900 py-2.5 rounded font-bold text-sm hover:bg-lime-300 disabled:opacity-50">
+                          {sending ? "Sending via Gmail..." : emailCampaigns[selected.id].status === "draft" ? "Send via Gmail →" : "Resend →"}
+                        </button>
                       </div>
                     </div>
                   )
