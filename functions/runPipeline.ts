@@ -1,33 +1,31 @@
-// Master Pipeline Orchestrator
-// Runs the full GhostSites pipeline for a single business:
-// Scrape → Analyze → Generate → Write Email
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 
-import base44 from "npm:@base44/sdk";
+const BASE_URL = "https://api.base44.com/api/apps/" + Deno.env.get("BASE44_APP_ID") + "/functions";
 
-const client = base44({ appId: Deno.env.get("BASE44_APP_ID") });
-const BASE_URL = Deno.env.get("BASE44_FUNCTION_BASE_URL") || "https://api.base44.com/api/apps/" + Deno.env.get("BASE44_APP_ID") + "/functions";
-
-async function callFunction(name: string, payload: Record<string, unknown>) {
+async function callFunction(name: string, payload: Record<string, unknown>, req: Request) {
   const res = await fetch(`${BASE_URL}/${name}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": Deno.env.get("BASE44_API_KEY") || "",
+      // Forward the original auth headers so the called function has a valid session
+      "cookie": req.headers.get("cookie") || "",
+      "authorization": req.headers.get("authorization") || "",
+      "x-api-key": req.headers.get("x-api-key") || "",
     },
     body: JSON.stringify(payload),
   });
   return res.json();
 }
 
-export default async function runPipeline(req: Request): Promise<Response> {
+Deno.serve(async (req) => {
   try {
-    const body = await req.json();
+    const base44 = createClientFromRequest(req);
+    const body = await req.json().catch(() => ({}));
     const { city, category, mode } = body;
 
     // MODE 1: Full campaign — scrape first, then process each business
     if (mode === "campaign" || (!body.business_id && city && category)) {
-      // Create Campaign record
-      const campaign = await client.asServiceRole.entities.Campaign.create({
+      const campaign = await base44.asServiceRole.entities.Campaign.create({
         query: `${category} in ${city}`,
         city,
         category,
@@ -38,9 +36,9 @@ export default async function runPipeline(req: Request): Promise<Response> {
       });
 
       // Step 1: Scrape
-      const scrapeResult = await callFunction("scrapeLeads", { city, category, campaign_id: campaign.id });
+      const scrapeResult = await callFunction("scrapeLeads", { city, category, campaign_id: campaign.id }, req);
       if (scrapeResult.error) {
-        await client.asServiceRole.entities.Campaign.update(campaign.id, {
+        await base44.asServiceRole.entities.Campaign.update(campaign.id, {
           status: "error",
           error_message: scrapeResult.error,
         });
@@ -48,7 +46,7 @@ export default async function runPipeline(req: Request): Promise<Response> {
       }
 
       // Step 2: Get all scraped businesses for this campaign
-      const businesses = await client.asServiceRole.entities.Business.filter({
+      const businesses = await base44.asServiceRole.entities.Business.filter({
         campaign_query: `${category} in ${city}`,
         status: "scraped",
       });
@@ -57,25 +55,21 @@ export default async function runPipeline(req: Request): Promise<Response> {
 
       for (const business of businesses) {
         try {
-          // Analyze personality
-          const analyzeResult = await callFunction("analyzePersonality", { business_id: business.id });
+          const analyzeResult = await callFunction("analyzePersonality", { business_id: business.id }, req);
           if (analyzeResult.error) continue;
 
-          // Generate site
-          const siteResult = await callFunction("generateSite", { business_id: business.id });
+          const siteResult = await callFunction("generateSite", { business_id: business.id }, req);
           if (siteResult.error) continue;
 
-          // Write email draft
-          await callFunction("writeEmail", { business_id: business.id });
+          await callFunction("writeEmail", { business_id: business.id }, req);
 
           sitesGenerated++;
         } catch {
-          // Continue with next business on error
           continue;
         }
       }
 
-      await client.asServiceRole.entities.Campaign.update(campaign.id, {
+      await base44.asServiceRole.entities.Campaign.update(campaign.id, {
         status: "done",
         sites_generated: sitesGenerated,
       });
@@ -94,17 +88,17 @@ export default async function runPipeline(req: Request): Promise<Response> {
       return Response.json({ error: "Provide either (city + category) or business_id" }, { status: 400 });
     }
 
-    const analyzeResult = await callFunction("analyzePersonality", { business_id });
+    const analyzeResult = await callFunction("analyzePersonality", { business_id }, req);
     if (analyzeResult.error) {
       return Response.json({ error: `Analyze failed: ${analyzeResult.error}` }, { status: 500 });
     }
 
-    const siteResult = await callFunction("generateSite", { business_id });
+    const siteResult = await callFunction("generateSite", { business_id }, req);
     if (siteResult.error) {
       return Response.json({ error: `Site generation failed: ${siteResult.error}` }, { status: 500 });
     }
 
-    const emailResult = await callFunction("writeEmail", { business_id });
+    const emailResult = await callFunction("writeEmail", { business_id }, req);
     if (emailResult.error) {
       return Response.json({ error: `Email writing failed: ${emailResult.error}` }, { status: 500 });
     }
@@ -119,4 +113,4 @@ export default async function runPipeline(req: Request): Promise<Response> {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({ error: message }, { status: 500 });
   }
-}
+});
