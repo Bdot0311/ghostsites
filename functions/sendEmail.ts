@@ -25,9 +25,6 @@ function buildMimeMessage(to: string, from: string, subject: string, body: strin
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
     const { campaign_id, to_email, from_name } = await req.json().catch(() => ({}));
     if (!campaign_id || !to_email) {
       return Response.json({ error: 'campaign_id and to_email required' }, { status: 400 });
