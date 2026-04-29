@@ -1,108 +1,66 @@
-import { createClientFromRequest, createClient } from 'npm:@base44/sdk@0.8.25';
+const APP_ID = '69efdfc7247e1585291f7701';
+const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
 
-function toBase64Url(str: string): string {
-  const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function dbFilter(entity: string, filters: Record<string, unknown>): Promise<unknown[]> {
+  const r = await fetch(`${BASE_URL}/entities/${entity}/filter`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-App-Id': APP_ID },
+    body: JSON.stringify(filters),
+  });
+  if (!r.ok) throw new Error(`DB filter ${entity} failed: ${await r.text()}`);
+  return r.json();
 }
 
-function buildMimeMessage(to: string, from: string, subject: string, body: string): string {
-  const msg = [
-    `From: ${from}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: text/plain; charset=UTF-8`,
-    ``,
-    body,
-  ].join('\r\n');
-  return toBase64Url(msg);
+async function dbUpdate(entity: string, id: string, data: Record<string, unknown>): Promise<void> {
+  const r = await fetch(`${BASE_URL}/entities/${entity}/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-App-Id': APP_ID },
+    body: JSON.stringify(data),
+  });
+  if (!r.ok) throw new Error(`DB update ${entity} failed: ${await r.text()}`);
 }
 
 Deno.serve(async (req) => {
   try {
-    // Use createClientFromRequest if Base44 headers present, otherwise fall back to service token
-    const serviceToken = Deno.env.get('BASE44_SERVICE_TOKEN') || '';
-    const appId = Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701';
-    const hasB44Headers = req.headers.get('Base44-App-Id') !== null;
-    const base44 = hasB44Headers
-      ? createClientFromRequest(req)
-      : createClient({ appId, serviceToken });
-    const { campaign_id, to_email, from_name } = await req.json().catch(() => ({}));
-    if (!campaign_id || !to_email) {
-      return Response.json({ error: 'campaign_id and to_email required' }, { status: 400 });
-    }
+    const { campaign_id, to_email, gmail_token } = await req.json().catch(() => ({}));
+    if (!campaign_id || !to_email) return Response.json({ error: 'campaign_id and to_email required' }, { status: 400 });
 
-    const campaigns = await base44.asServiceRole.entities.EmailCampaign.filter({ id: campaign_id });
+    const campaigns = await dbFilter('EmailCampaign', { id: campaign_id }) as Record<string, unknown>[];
     if (!campaigns?.length) return Response.json({ error: 'Campaign not found' }, { status: 404 });
     const campaign = campaigns[0];
 
-    if (campaign.status === 'sent') {
-      return Response.json({ error: 'Email already sent' }, { status: 400 });
-    }
+    const token = gmail_token || Deno.env.get('GMAIL_ACCESS_TOKEN');
+    if (!token) return Response.json({ error: 'Gmail token required' }, { status: 400 });
 
-    const businesses = await base44.asServiceRole.entities.Business.filter({ id: campaign.business_id });
-    const business = businesses?.[0];
-    if (business?.unsubscribed) {
-      return Response.json({ error: 'Business has unsubscribed' }, { status: 400 });
-    }
+    const emailLines = [
+      `To: ${to_email}`,
+      `Subject: ${campaign.subject}`,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      campaign.body as string,
+    ];
+    const raw = btoa(emailLines.join('\r\n')).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-    // Get Gmail token via Base44 connector (correct pattern)
-    const { accessToken } = await base44.asServiceRole.connectors.getConnection('gmail');
-    if (!accessToken) return Response.json({ error: 'Gmail not connected' }, { status: 500 });
-
-    // Get sender's Gmail address
-    const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!profileRes.ok) {
-      return Response.json({ error: 'Failed to get Gmail profile' }, { status: 500 });
-    }
-    const gmailProfile = await profileRes.json();
-    const fromEmail = gmailProfile.emailAddress;
-    const fromDisplay = from_name ? `${from_name} <${fromEmail}>` : fromEmail;
-
-    const raw = buildMimeMessage(to_email, fromDisplay, campaign.subject, campaign.body);
-
-    const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ raw }),
     });
 
-    if (!sendRes.ok) {
-      const err = await sendRes.text();
-      await base44.asServiceRole.entities.EmailCampaign.update(campaign_id, {
-        send_attempts: (campaign.send_attempts || 0) + 1,
-        status: 'failed',
-      });
-      return Response.json({ error: `Gmail send error: ${err}` }, { status: 500 });
+    if (!gmailRes.ok) {
+      const err = await gmailRes.text();
+      await dbUpdate('EmailCampaign', campaign_id, { send_attempts: ((campaign.send_attempts as number) || 0) + 1 });
+      throw new Error(`Gmail error: ${err}`);
     }
 
-    const sentMsg = await sendRes.json();
-
-    await base44.asServiceRole.entities.EmailCampaign.update(campaign_id, {
+    await dbUpdate('EmailCampaign', campaign_id, {
       status: 'sent',
       sent_at: new Date().toISOString(),
-      send_attempts: (campaign.send_attempts || 0) + 1,
+      send_attempts: ((campaign.send_attempts as number) || 0) + 1,
     });
 
-    if (business && !business.email) {
-      await base44.asServiceRole.entities.Business.update(business.id, { email: to_email });
-    }
-
-    return Response.json({
-      success: true,
-      gmail_message_id: sentMsg.id,
-      from: fromEmail,
-      to: to_email,
-      subject: campaign.subject,
-    });
-  } catch (error: unknown) {
-    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return Response.json({ success: true });
+  } catch (err: unknown) {
+    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 });

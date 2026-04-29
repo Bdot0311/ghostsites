@@ -1,15 +1,29 @@
-import { createClientFromRequest, createClient } from 'npm:@base44/sdk@0.8.25';
+const APP_ID = '69efdfc7247e1585291f7701';
+const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
+
+async function dbCreate(entity: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const r = await fetch(`${BASE_URL}/entities/${entity}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-App-Id': APP_ID },
+    body: JSON.stringify(data),
+  });
+  if (!r.ok) throw new Error(`DB create ${entity} failed: ${await r.text()}`);
+  return r.json();
+}
+
+async function dbFilter(entity: string, filters: Record<string, unknown>): Promise<unknown[]> {
+  const r = await fetch(`${BASE_URL}/entities/${entity}/filter`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-App-Id': APP_ID },
+    body: JSON.stringify(filters),
+  });
+  if (!r.ok) throw new Error(`DB filter ${entity} failed: ${await r.text()}`);
+  return r.json();
+}
 
 Deno.serve(async (req) => {
   try {
-    // Use createClientFromRequest if Base44 headers present, otherwise fall back to service token
-    const serviceToken = Deno.env.get('BASE44_SERVICE_TOKEN') || '';
-    const appId = Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701';
-    const hasB44Headers = req.headers.get('Base44-App-Id') !== null;
-    const base44 = hasB44Headers
-      ? createClientFromRequest(req)
-      : createClient({ appId, serviceToken });
-    const { city, category, campaign_id } = await req.json().catch(() => ({}));
+    const { city, category } = await req.json().catch(() => ({}));
     if (!city || !category) return Response.json({ error: 'city and category required' }, { status: 400 });
 
     const KEY = Deno.env.get('GOOGLE_PLACES_API_KEY');
@@ -18,35 +32,15 @@ Deno.serve(async (req) => {
     const allPlaces: Record<string, unknown>[] = [];
     let nextToken: string | undefined;
     let pg = 0;
-
     do {
-      const payload: Record<string, unknown> = {
-        textQuery: `${category} in ${city}`,
-        maxResultCount: 20,
-      };
+      const payload: Record<string, unknown> = { textQuery: `${category} in ${city}`, maxResultCount: 20 };
       if (nextToken) payload.pageToken = nextToken;
-
       const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': KEY,
-          'X-Goog-FieldMask': [
-            'places.id', 'places.displayName', 'places.websiteUri',
-            'places.formattedAddress', 'places.nationalPhoneNumber',
-            'places.rating', 'places.userRatingCount',
-            'places.regularOpeningHours', 'places.photos',
-            'places.businessStatus', 'nextPageToken',
-          ].join(','),
-        },
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': KEY, 'X-Goog-FieldMask': 'places.id,places.displayName,places.websiteUri,places.formattedAddress,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos,places.businessStatus,nextPageToken' },
         body: JSON.stringify(payload),
       });
-
-      if (!r.ok) {
-        const e = await r.text();
-        return Response.json({ error: `Places API error: ${e}` }, { status: 500 });
-      }
-
+      if (!r.ok) throw new Error(`Places API: ${await r.text()}`);
       const d = await r.json();
       if (d.places) allPlaces.push(...d.places);
       nextToken = d.nextPageToken;
@@ -54,11 +48,11 @@ Deno.serve(async (req) => {
       if (nextToken) await new Promise(res => setTimeout(res, 1500));
     } while (nextToken && pg < 3);
 
-    const queue: Record<string, unknown>[] = [];
-
+    const saved: string[] = [];
     for (const pl of allPlaces) {
-      if (pl.websiteUri) continue;
-      if (pl.businessStatus === 'PERMANENTLY_CLOSED') continue;
+      if (pl.websiteUri || pl.businessStatus === 'PERMANENTLY_CLOSED') continue;
+      const existing = await dbFilter('Business', { google_place_id: pl.id as string }) as unknown[];
+      if (existing?.length > 0) continue;
 
       let reviews: { author: string; text: string; rating: number }[] = [];
       try {
@@ -73,55 +67,32 @@ Deno.serve(async (req) => {
             rating: (rv.rating as number) ?? 5,
           }));
         }
-      } catch (_) {}
+      } catch (_) { /* skip */ }
 
-      const photoUrls = ((pl.photos as { name: string }[]) || []).slice(0, 5)
+      const photoUrls = ((pl.photos as { name: string }[]) || []).slice(0, 3)
         .map(p => `https://places.googleapis.com/v1/${p.name}/media?maxWidthPx=800&key=${KEY}`);
-
       const fullAddr = (pl.formattedAddress as string) ?? '';
       const addrParts = fullAddr.split(',');
       const street = addrParts.slice(0, -3).join(',').trim() || addrParts[0]?.trim() || '';
       const stateCode = addrParts.slice(-2, -1)[0]?.trim().split(' ')[0] ?? '';
-      const bizName = (pl.displayName as Record<string, string>)?.text ?? 'Unknown';
-      const hours = ((pl.regularOpeningHours as Record<string, string[]>)?.weekdayDescriptions ?? []).join(', ');
 
-      queue.push({
-        name: bizName, category, address: street, city, state: stateCode,
-        phone: (pl.nationalPhoneNumber as string) ?? '',
-        email: '',
+      const created = await dbCreate('Business', {
+        name: (pl.displayName as Record<string, string>)?.text ?? 'Unknown', category,
+        address: street, city, state: stateCode,
+        phone: (pl.nationalPhoneNumber as string) ?? '', email: '',
         google_place_id: pl.id as string,
-        rating: (pl.rating as number) ?? 0,
-        review_count: (pl.userRatingCount as number) ?? 0,
-        top_reviews: reviews,
-        photos: photoUrls,
-        hours,
-        owner_name: '', year_established: '',
-        personality_profile: null,
-        status: 'scraped',
-        campaign_query: `${category} in ${city}`,
-        unsubscribed: false,
+        rating: (pl.rating as number) ?? 0, review_count: (pl.userRatingCount as number) ?? 0,
+        top_reviews: reviews, photos: photoUrls,
+        hours: ((pl.regularOpeningHours as Record<string, string[]>)?.weekdayDescriptions ?? []).join(', '),
+        owner_name: '', year_established: '', personality_profile: null,
+        status: 'scraped', campaign_query: `${category} in ${city}`, unsubscribed: false,
       });
-
+      saved.push(created.id as string);
       await new Promise(res => setTimeout(res, 150));
     }
 
-    let saved = 0;
-    for (const biz of queue) {
-      const existing = await base44.asServiceRole.entities.Business.filter({ google_place_id: biz.google_place_id as string });
-      if (existing?.length > 0) continue;
-      await base44.asServiceRole.entities.Business.create(biz);
-      saved++;
-    }
-
-    if (campaign_id) {
-      await base44.asServiceRole.entities.Campaign.update(campaign_id, {
-        businesses_found: saved,
-        status: saved > 0 ? 'analyzing' : 'done',
-      });
-    }
-
-    return Response.json({ success: true, found: allPlaces.length, no_website: queue.length, saved });
-  } catch (error: unknown) {
-    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return Response.json({ success: true, saved_count: saved.length, business_ids: saved });
+  } catch (err: unknown) {
+    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 });

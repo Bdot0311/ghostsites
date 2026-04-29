@@ -1,22 +1,22 @@
-import { createClientFromRequest, createClient } from 'npm:@base44/sdk@0.8.25';
+const APP_ID = '69efdfc7247e1585291f7701';
+const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
 
-Deno.serve(async (req) => {
+async function dbList(entity: string): Promise<unknown[]> {
+  const r = await fetch(`${BASE_URL}/entities/${entity}`, { headers: { 'X-App-Id': APP_ID } });
+  if (!r.ok) throw new Error(`DB list ${entity} failed: ${await r.text()}`);
+  return r.json();
+}
+
+Deno.serve(async (_req) => {
   try {
-    // Use createClientFromRequest if Base44 headers present, otherwise fall back to service token
-    const serviceToken = Deno.env.get('BASE44_SERVICE_TOKEN') || '';
-    const appId = Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701';
-    const hasB44Headers = req.headers.get('Base44-App-Id') !== null;
-    const base44 = hasB44Headers
-      ? createClientFromRequest(req)
-      : createClient({ appId, serviceToken });
-    const [businesses, sites, emailCampaigns, campaigns] = await Promise.all([
-      base44.asServiceRole.entities.Business.list(),
-      base44.asServiceRole.entities.GeneratedSite.list(),
-      base44.asServiceRole.entities.EmailCampaign.list(),
-      base44.asServiceRole.entities.Campaign.list(),
+    const [businesses, sites, campaigns, emailCampaigns] = await Promise.all([
+      dbList('Business'),
+      dbList('GeneratedSite'),
+      dbList('Campaign'),
+      dbList('EmailCampaign'),
     ]);
-    return Response.json({ businesses: businesses || [], sites: sites || [], emailCampaigns: emailCampaigns || [], campaigns: campaigns || [] });
-  } catch (error: unknown) {
-    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return Response.json({ businesses, sites, campaigns, emailCampaigns });
+  } catch (err: unknown) {
+    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 });
