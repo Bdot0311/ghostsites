@@ -3,6 +3,23 @@ import { Business, GeneratedSite, EmailCampaign, Campaign } from "@/api/entities
 
 import { base44 } from "@/api/base44Client";
 
+async function callFn(name, payload) {
+  try {
+    const res = await fetch(`/functions/${name}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      return { error: txt };
+    }
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
 const STATUS_COLORS = {
   scraped: "bg-gray-100 text-gray-700",
   site_generated: "bg-blue-100 text-blue-700",
@@ -21,14 +38,7 @@ const STATUS_ICONS = {
   converted: "🎉",
 };
 
-async function callFn(name, payload) {
-  try {
-    const result = await base44.functions.invoke(name, payload);
-    return result?.data ?? result;
-  } catch (e) {
-    return { error: e.message };
-  }
-}
+
 
 export default function Dashboard() {
   const [tab, setTab] = useState("leads");
