@@ -11,6 +11,24 @@ async function callClaude(apiKey: string, system: string, user: string, maxToken
   return d.content[0].text;
 }
 
+async function uploadHtml(html: string, filename: string, serviceToken: string, appId: string): Promise<string> {
+  const bytes = new TextEncoder().encode(html);
+  const blob = new Blob([bytes], { type: 'text/html' });
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await fetch(`https://base44.app/api/apps/${appId}/integration-endpoints/Core/UploadFile`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${serviceToken}`,
+      'X-App-Id': appId,
+    },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
+  const data = await res.json();
+  return data.file_url || '';
+}
+
 const COLOR_PALETTES: Record<number, { name: string; background: string; text: string; primary: string; secondary: string; accent: string; muted: string }> = {
   1: { name: "Cream Ink", background: "#FAF6ED", text: "#1A1A1A", primary: "#F5F1E8", secondary: "#1A1A1A", accent: "#C04F2E", muted: "#6B6B6B" },
   2: { name: "Sage Linen", background: "#F2F0E8", text: "#2C2E27", primary: "#D4DDC9", secondary: "#4A5240", accent: "#E8B86D", muted: "#7A7D70" },
@@ -32,7 +50,7 @@ const TYPOGRAPHY_PAIRS: Record<number, { name: string; heading_font: string; bod
   9: { name: "Space Grotesk + JetBrains Mono", heading_font: "Space Grotesk", body_font: "JetBrains Mono", google_fonts: "Space+Grotesk:wght@300..700&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800" },
   10: { name: "Archivo Black + Inter", heading_font: "Archivo Black", body_font: "Inter", google_fonts: "Archivo+Black&family=Inter:wght@300;400;500;600" },
   18: { name: "Fraunces + Inter (Warm)", heading_font: "Fraunces", body_font: "Inter", google_fonts: "Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Inter:wght@300;400;500;600" },
-  20: { name: "Abril Fatface + Raleway", heading_font: "Abril Fatface", body_font: "Raleway", google_fonts: "Abril+Fatface&family=Raleway:ital,wght@0,300..700;1,300..700" },
+  20: { name: "Abril Fatface + Raleway", heading_font: "Abril Fatface", body_font: "Raleway", google_fonts: "Abril+Fatface&family=Raleway:wght@0,300..700;1,300..700" },
 };
 const ARCHETYPE_PALETTE_MAP: Record<string, number[]> = {
   "Editorial": [1, 39], "Soft Luxury": [2, 4, 8], "Brutalist": [9, 10, 11],
@@ -68,13 +86,13 @@ function pickRandom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.
 
 Deno.serve(async (req) => {
   try {
-    // Use createClientFromRequest if Base44 headers present, otherwise fall back to service token
     const serviceToken = Deno.env.get('BASE44_SERVICE_TOKEN') || '';
     const appId = Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701';
     const hasB44Headers = req.headers.get('Base44-App-Id') !== null;
     const base44 = hasB44Headers
       ? createClientFromRequest(req)
       : createClient({ appId, serviceToken });
+
     const { business_id } = await req.json().catch(() => ({}));
     if (!business_id) return Response.json({ error: 'business_id required' }, { status: 400 });
 
@@ -151,19 +169,21 @@ Photos: ${(business.photos || []).slice(0, 3).join(', ') || 'None — use type-f
 Generate the complete production-ready HTML now.`;
 
     const text = await callClaude(apiKey, systemPrompt, userPrompt, 8000);
-    let htmlContent = text.replace(/^```html\n?/, '').replace(/\n?```$/, '');
+    const htmlContent = text.replace(/^```html\n?/, '').replace(/\n?```$/, '');
 
-    // Store HTML directly in the entity field
+    // Upload HTML to file storage (entity field has size limit)
+    const filename = `${business_id}-${Date.now()}.html`;
+    const htmlFileUrl = await uploadHtml(htmlContent, filename, serviceToken, appId);
 
     const heroMatch = htmlContent.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
     const hero_copy = heroMatch ? heroMatch[1].replace(/<[^>]+>/g, '').trim() : '';
     const subdomain = business.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
-    const subdomain_url = `https://ghostsites.preview/${subdomain}`;
+    const subdomain_url = htmlFileUrl || `https://ghostsites.preview/${subdomain}`;
 
     const site = await base44.asServiceRole.entities.GeneratedSite.create({
       business_id,
       subdomain_url,
-      full_html: htmlContent,
+      full_html: htmlFileUrl,
       design_archetype: archetype,
       color_palette_id: paletteId,
       typography_pair_id: typographyId,
@@ -186,6 +206,7 @@ Generate the complete production-ready HTML now.`;
       success: true,
       site_id: site.id,
       subdomain_url,
+      html_url: htmlFileUrl,
       design_archetype: archetype,
       palette: palette.name,
       typography: typography.name,

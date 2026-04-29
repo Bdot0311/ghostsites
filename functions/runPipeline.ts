@@ -18,6 +18,25 @@ function parseJSON(text: string) {
   return JSON.parse(m[0]);
 }
 
+async function uploadHtml(html: string, filename: string, serviceToken: string, appId: string): Promise<string> {
+  const bytes = new TextEncoder().encode(html);
+  const blob = new Blob([bytes], { type: 'text/html' });
+  const form = new FormData();
+  form.append('file', blob, filename);
+  const res = await fetch(`https://base44.app/api/apps/${appId}/integration-endpoints/Core/UploadFile`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${serviceToken}`,
+      'X-App-Id': appId,
+    },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
+  const data = await res.json();
+  return data.file_url || '';
+}
+
+
 // ── Design tokens ──────────────────────────────────────────────────────────
 const COLOR_PALETTES: Record<number, { name: string; background: string; text: string; primary: string; secondary: string; accent: string; muted: string }> = {
   1: { name: "Cream Ink", background: "#FAF6ED", text: "#1A1A1A", primary: "#F5F1E8", secondary: "#1A1A1A", accent: "#C04F2E", muted: "#6B6B6B" },
@@ -105,7 +124,7 @@ OUTPUT — JSON ONLY:
 }
 
 // deno-lint-ignore no-explicit-any
-async function generateSite(base44: any, business: any, profile: any, apiKey: string) {
+async function generateSite(base44: any, business: any, profile: any, apiKey: string, serviceToken: string, appId: string) {
   const existingSites = await base44.asServiceRole.entities.GeneratedSite.list();
   const existingFingerprints = (existingSites || []).map((s: { design_fingerprint: string }) => s.design_fingerprint).filter(Boolean);
   const archetype = profile.design_archetype || 'Warm Local';
@@ -144,10 +163,10 @@ OUTPUT: Single HTML file, embedded style+script, no external CSS frameworks exce
   const subdomain = business.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
   const subdomain_url = `https://ghostsites.preview/${subdomain}`;
 
-  const htmlUrl = subdomain_url; // HTML stored directly in full_html field
-
+  // Upload HTML to file storage (entity field has size limit)
+  const htmlFileUrl = await uploadHtml(htmlContent, `${business.id}-${Date.now()}.html`, serviceToken, appId);
   const site = await base44.asServiceRole.entities.GeneratedSite.create({
-    business_id: business.id, subdomain_url, full_html: htmlContent,
+    business_id: business.id, subdomain_url: htmlFileUrl || subdomain_url, full_html: htmlFileUrl,
     design_archetype: archetype, color_palette_id: paletteId, typography_pair_id: typographyId,
     layout_variant: layout, section_order: sectionOrder, micro_interactions: microInteractions,
     imagery_treatment: 'CLEAN', design_fingerprint: finalFingerprint, hero_copy,
@@ -284,7 +303,7 @@ Deno.serve(async (req) => {
       for (const business of savedBusinesses) {
         try {
           const profile = await analyzePersonality(base44, business, apiKey);
-          const site = await generateSite(base44, business, profile, apiKey);
+          const site = await generateSite(base44, business, profile, apiKey, serviceToken, appId);
           await writeEmail(base44, business, profile, site, apiKey);
           sitesGenerated++;
         } catch (e) {
@@ -308,7 +327,7 @@ Deno.serve(async (req) => {
     const business = businesses[0];
 
     const profile = await analyzePersonality(base44, business, apiKey);
-    const site = await generateSite(base44, business, profile, apiKey);
+    const site = await generateSite(base44, business, profile, apiKey, serviceToken, appId);
     const email = await writeEmail(base44, business, profile, site, apiKey);
 
     return Response.json({ success: true, business_id, site, email });
