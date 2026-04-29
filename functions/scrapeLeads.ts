@@ -1,11 +1,14 @@
-import { createClient } from 'npm:@base44/sdk@0.8.25';
+import { createClientFromRequest, createClient } from 'npm:@base44/sdk@0.8.25';
 
 Deno.serve(async (req) => {
   try {
-    const base44 = createClient({
-      appId: Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701',
-      serviceToken: Deno.env.get('BASE44_SERVICE_TOKEN') || '',
-    });
+    // Use createClientFromRequest if Base44 headers present, otherwise fall back to service token
+    const serviceToken = Deno.env.get('BASE44_SERVICE_TOKEN') || '';
+    const appId = Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701';
+    const hasB44Headers = req.headers.get('Base44-App-Id') !== null;
+    const base44 = hasB44Headers
+      ? createClientFromRequest(req)
+      : createClient({ appId, serviceToken });
     const { city, category, campaign_id } = await req.json().catch(() => ({}));
     if (!city || !category) return Response.json({ error: 'city and category required' }, { status: 400 });
 

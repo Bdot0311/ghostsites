@@ -1,4 +1,4 @@
-import { createClient } from 'npm:@base44/sdk@0.8.25';
+import { createClientFromRequest, createClient } from 'npm:@base44/sdk@0.8.25';
 
 function toBase64Url(str: string): string {
   const bytes = new TextEncoder().encode(str);
@@ -22,10 +22,13 @@ function buildMimeMessage(to: string, from: string, subject: string, body: strin
 
 Deno.serve(async (req) => {
   try {
-    const base44 = createClient({
-      appId: Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701',
-      serviceToken: Deno.env.get('BASE44_SERVICE_TOKEN') || '',
-    });
+    // Use createClientFromRequest if Base44 headers present, otherwise fall back to service token
+    const serviceToken = Deno.env.get('BASE44_SERVICE_TOKEN') || '';
+    const appId = Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701';
+    const hasB44Headers = req.headers.get('Base44-App-Id') !== null;
+    const base44 = hasB44Headers
+      ? createClientFromRequest(req)
+      : createClient({ appId, serviceToken });
     const { campaign_id, to_email, from_name } = await req.json().catch(() => ({}));
     if (!campaign_id || !to_email) {
       return Response.json({ error: 'campaign_id and to_email required' }, { status: 400 });
