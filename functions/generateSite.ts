@@ -11,23 +11,6 @@ async function callClaude(apiKey: string, system: string, user: string, maxToken
   return d.content[0].text;
 }
 
-async function uploadHtml(html: string, filename: string): Promise<string> {
-  const appId = Deno.env.get('BASE44_APP_ID') || '';
-  const apiKey = Deno.env.get('BASE44_API_KEY') || '';
-  const bytes = new TextEncoder().encode(html);
-  const blob = new Blob([bytes], { type: 'text/html' });
-  const form = new FormData();
-  form.append('file', blob, filename);
-  const res = await fetch(`https://api.base44.com/api/apps/${appId}/uploadFile`, {
-    method: 'POST',
-    headers: { 'x-api-key': apiKey },
-    body: form,
-  });
-  if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
-  const data = await res.json();
-  return data.file_url || data.url || '';
-}
-
 const COLOR_PALETTES: Record<number, { name: string; background: string; text: string; primary: string; secondary: string; accent: string; muted: string }> = {
   1: { name: "Cream Ink", background: "#FAF6ED", text: "#1A1A1A", primary: "#F5F1E8", secondary: "#1A1A1A", accent: "#C04F2E", muted: "#6B6B6B" },
   2: { name: "Sage Linen", background: "#F2F0E8", text: "#2C2E27", primary: "#D4DDC9", secondary: "#4A5240", accent: "#E8B86D", muted: "#7A7D70" },
@@ -170,18 +153,17 @@ Generate the complete production-ready HTML now.`;
     const text = await callClaude(apiKey, systemPrompt, userPrompt, 8000);
     let htmlContent = text.replace(/^```html\n?/, '').replace(/\n?```$/, '');
 
-    // Upload HTML to file storage (too large for entity field)
-    const htmlFileUrl = await uploadHtml(htmlContent, `${business_id}-${Date.now()}.html`);
+    // Store HTML directly in the entity field
 
     const heroMatch = htmlContent.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
     const hero_copy = heroMatch ? heroMatch[1].replace(/<[^>]+>/g, '').trim() : '';
     const subdomain = business.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
-    const subdomain_url = htmlFileUrl || `https://ghostsites.preview/${subdomain}`;
+    const subdomain_url = `https://ghostsites.preview/${subdomain}`;
 
     const site = await base44.asServiceRole.entities.GeneratedSite.create({
       business_id,
       subdomain_url,
-      full_html: htmlFileUrl,  // Store URL to uploaded file instead of raw HTML
+      full_html: htmlContent,
       design_archetype: archetype,
       color_palette_id: paletteId,
       typography_pair_id: typographyId,
@@ -204,7 +186,6 @@ Generate the complete production-ready HTML now.`;
       success: true,
       site_id: site.id,
       subdomain_url,
-      html_url: htmlFileUrl,
       design_archetype: archetype,
       palette: palette.name,
       typography: typography.name,
