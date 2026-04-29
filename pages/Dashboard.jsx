@@ -1,7 +1,4 @@
 import { useState, useEffect } from "react";
-import { Business, GeneratedSite, EmailCampaign, Campaign } from "@/api/entities";
-
-import { base44 } from "@/api/base44Client";
 
 async function callFn(name, payload) {
   try {
@@ -62,17 +59,14 @@ export default function Dashboard() {
 
   async function loadData() {
     try {
-      const [biz, siteList, ecList] = await Promise.all([
-        Business.list(),
-        GeneratedSite.list(),
-        EmailCampaign.list(),
-      ]);
-      setBusinesses(biz || []);
+      const res = await callFn("getData", {});
+      if (res?.error) { console.error("loadData error:", res.error); return; }
+      setBusinesses(res.businesses || []);
       const siteMap = {};
-      (siteList || []).forEach(s => { siteMap[s.business_id] = s; });
+      (res.sites || []).forEach(s => { siteMap[s.business_id] = s; });
       setSites(siteMap);
       const ecMap = {};
-      (ecList || []).forEach(e => { ecMap[e.business_id] = e; });
+      (res.emailCampaigns || []).forEach(e => { ecMap[e.business_id] = e; });
       setEmailCampaigns(ecMap);
     } catch (e) {
       console.error("loadData error:", e);
@@ -82,76 +76,19 @@ export default function Dashboard() {
   async function startCampaign() {
     if (!campaignForm.city || !campaignForm.category) return;
     setRunning(true);
-    setRunLog([]);
+    setRunLog([`🔍 Scraping "${campaignForm.category} in ${campaignForm.city}"...`]);
     setShowNewCampaign(false);
     const log = (msg) => setRunLog(prev => [...prev, msg]);
-
     try {
-      const campaign = await Campaign.create({
-        query: `${campaignForm.category} in ${campaignForm.city}`,
+      log(`🧠 Analyzing + building sites + writing emails...`);
+      const res = await callFn("runPipeline", {
         city: campaignForm.city,
         category: campaignForm.category,
-        status: "scraping",
-        businesses_found: 0,
-        sites_generated: 0,
-        emails_sent: 0,
+        mode: "campaign",
       });
-
-      log(`🔍 Scraping Google Maps for "${campaignForm.category} in ${campaignForm.city}"...`);
-
-      const scrapeRes = await callFn("scrapeLeads", {
-        city: campaignForm.city,
-        category: campaignForm.category,
-        campaign_id: campaign.id,
-      });
-
-      if (scrapeRes?.error) throw new Error(scrapeRes.error);
-
-      const saved = scrapeRes?.saved || 0;
-      log(`✅ ${scrapeRes?.found || 0} found · ${scrapeRes?.no_website || 0} without websites · ${saved} new leads saved`);
-
-      if (saved === 0) {
-        log(`ℹ️ No new businesses found. Try a different city or category.`);
-        await Campaign.update(campaign.id, { status: "done" });
-        await loadData();
-        return;
-      }
-
+      if (res?.error) throw new Error(res.error);
+      log(`🎉 Done — ${res.businesses_found || 0} leads found, ${res.sites_generated || 0} sites built`);
       await loadData();
-      const freshBiz = await Business.filter({
-        campaign_query: `${campaignForm.category} in ${campaignForm.city}`,
-        status: "scraped",
-      });
-
-      let sitesGenerated = 0;
-      for (const biz of (freshBiz || []).slice(0, 10)) {
-        try {
-          log(`🧠 ${biz.name}...`);
-          const analyzeRes = await callFn("analyzePersonality", { business_id: biz.id });
-          if (analyzeRes?.error) { log(`  ⚠️ ${analyzeRes.error}`); continue; }
-          log(`  ✅ ${analyzeRes?.profile?.design_archetype} — ${(analyzeRes?.profile?.personality_keywords || []).slice(0, 3).join(", ")}`);
-
-          log(`  🎨 Building site...`);
-          const siteRes = await callFn("generateSite", { business_id: biz.id });
-          if (siteRes?.error) { log(`  ⚠️ ${siteRes.error}`); continue; }
-          log(`  ✅ ${siteRes?.layout} · ${siteRes?.palette}`);
-
-          log(`  ✍️ Writing email...`);
-          const emailRes = await callFn("writeEmail", { business_id: biz.id });
-          if (emailRes?.error) { log(`  ⚠️ ${emailRes.error}`); continue; }
-          log(`  ✅ "${emailRes?.subject}"`);
-
-          sitesGenerated++;
-          await loadData();
-        } catch (e) {
-          log(`  ❌ ${biz.name}: ${e.message}`);
-        }
-      }
-
-      await Campaign.update(campaign.id, { status: "done", sites_generated: sitesGenerated });
-      log(`🎉 Done — ${sitesGenerated} sites built, ${saved} leads in your dashboard`);
-      await loadData();
-
     } catch (err) {
       log(`❌ ${err.message}`);
     } finally {
@@ -204,7 +141,7 @@ export default function Dashboard() {
         from_name: "Alex",
       });
       if (res?.error) throw new Error(res.error);
-      await Business.update(business.id, { status: "email_sent" });
+      await callFn("updateRecord", { entity: "Business", id: business.id, data: { status: "email_sent" } });
       await loadData();
       alert(`✅ Sent to ${business.email}`);
     } catch (err) {
@@ -215,13 +152,13 @@ export default function Dashboard() {
   }
 
   async function saveEmailDraft(campaignId, subject, body) {
-    await EmailCampaign.update(campaignId, { subject, body });
+    await callFn("updateRecord", { entity: "EmailCampaign", id: campaignId, data: { subject, body } });
     await loadData();
     setEditEmail(null);
   }
 
   async function markConverted(business) {
-    await Business.update(business.id, { status: "converted" });
+    await callFn("updateRecord", { entity: "Business", id: business.id, data: { status: "converted" } });
     await loadData();
   }
 
@@ -520,7 +457,7 @@ export default function Dashboard() {
                           className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:border-lime-400 focus:outline-none"
                           onBlur={async (e) => {
                             if (e.target.value && e.target.value !== selected.email) {
-                              await Business.update(selected.id, { email: e.target.value });
+                              await callFn("updateRecord", { entity: "Business", id: selected.id, data: { email: e.target.value } });
                               setSelected(prev => ({ ...prev, email: e.target.value }));
                             }
                           }}
