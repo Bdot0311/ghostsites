@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Barber Shop Austin 35 | Austin, TX</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #2C2C2C;
+            --text: #FAFAFA;
+            --primary: #1F1F1F;
+            --secondary: #FAFAFA;
+            --accent: #FFD600;
+            --muted: #999999;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+            cursor: none;
+            overflow-x: hidden;
+        }
+
+        /* Custom Cursor */
+        .cursor {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--accent);
+            border-radius: 50%;
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s;
+            transform: translate(-50%, -50%);
+        }
+
+        .cursor-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            position: fixed;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+        }
+
+        .cursor.hover {
+            transform: translate(-50%, -50%) scale(2);
+            background: rgba(255, 214, 0, 0.1);
+        }
+
+        /* Typography */
+        h1, h2, h3, h4 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: -0.02em;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+            background: var(--primary);
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('https://places.googleapis.com/v1/places/ChIJ3w-qXhXLRIYRzdD0Dv33mKY/photos/Ab43m-tNFCO8BUbCK3-uXiwq1KNl-4w53EoDhTcBXnZi7rFFUAXpnyI1VRk5kk6Fp2JrVykg3KA5FCKJHyXTZjPTis2w8N7pnm3gF4nAhT1qT0eGk_R_Vb4iJVKpYqCVBDce-EEYE1CRLH3YQFWaN44NBkp79TY0bAkjufEHum3Gt48ysa15VN-uss-OpmjLGZbjrWYN-faJ9IXb3IC0NjN-_bPKFQWrC2-jEFYM4PJH2f-DdKSvgIlya2G0j9drDdgo8acshgYMyHwF2kVRlbe1WYT_Lana-IPx3_aFkp_85g6JxA/media?maxWidthPx=800&key=AIzaSyBrfv-UZjIJx_kaj8AeU78gXsgA_KfL22s') center/cover no-repeat;
+            opacity: 0.2;
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero h1 {
+            font-size: clamp(3rem, 15vw, 10rem);
+            line-height: 0.9;
+            margin-bottom: 2rem;
+        }
+
+        .hero h1 span {
+            display: block;
+            color: var(--accent);
+        }
+
+        .rating {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--accent);
+            color: var(--primary);
+            padding: 0.5rem 1rem;
+            font-weight: 700;
+            font-size: 0.875rem;
+        }
+
+        /* Marquee */
+        .marquee-container {
+            overflow: hidden;
+            background: var(--accent);
+            color: var(--primary);
+            padding: 1rem 0;
+        }
+
+        .marquee {
+            display: flex;
+            animation: marquee 20s linear infinite;
+            white-space: nowrap;
+        }
+
+        .marquee span {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 1.25rem;
+            text-transform: uppercase;
+            padding: 0 2rem;
+        }
+
+        @keyframes marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+
+        /* Sections */
+        section {
+            padding: 4rem 1.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-size: clamp(2rem, 8vw, 4rem);
+            margin-bottom: 2rem;
+            position: relative;
+            display: inline-block;
+        }
+
+        .section-title::after {
+            content: '';
+            position: absolute;
+            bottom: -0.5rem;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: var(--accent);
+        }
+
+        /* Contact Section */
+        .contact {
+            background: var(--primary);
+            padding: 4rem 1.5rem;
+        }
+
+        .contact-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .contact-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        @media (min-width: 768px) {
+            .contact-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .contact-item {
+            border: 2px solid var(--accent);
+            padding: 2rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .contact-item:hover {
+            background: var(--accent);
+            color: var(--primary);
+        }
+
+        .contact-item h3 {
+            font-size: 0.875rem;
+            color: var(--muted);
+            margin-bottom: 0.5rem;
+            transition: color 0.3s;
+        }
+
+        .contact-item:hover h3 {
+            color: var(--primary);
+        }
+
+        .contact-item p, .contact-item a {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        /* Hours Section */
+        .hours {
+            background: var(--bg);
+        }
+
+        .hours-grid {
+            display: grid;
+            gap: 0;
+            border: 2px solid var(--secondary);
+        }
+
+        .hours-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            border-bottom: 1px solid var(--muted);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .hours-row:last-child {
+            border-bottom: none;
+        }
+
+        .hours-row:hover {
+            background: var(--accent);
+            color: var(--primary);
+        }
+
+        .hours-row span {
+            padding: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .hours-row span:first-child {
+            font-weight: 700;
+            border-right: 1px solid var(--muted);
+        }
+
+        /* Reviews Section */
+        .reviews {
+            background: var(--primary);
+            padding: 4rem 1.5rem;
+        }
+
+        .reviews-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .review-card {
+            border-left: 4px solid var(--accent);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            background: var(--bg);
+            position: relative;
+        }
+
+        .review-card::before {
+            content: '"';
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 6rem;
+            color: var(--accent);
+            position: absolute;
+            top: -1rem;
+            left: 1rem;
+            opacity: 0.3;
+        }
+
+        .review-text {
+            font-size: 1rem;
+            line-height: 1.7;
+            margin-bottom: 1rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .review-author {
+            color: var(--accent);
+            font-weight: 700;
+            font-size: 0.875rem;
+        }
+
+        /* Services Section */
+        .services {
+            background: var(--bg);
+        }
+
+        .services-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1px;
+            background: var(--muted);
+            border: 2px solid var(--muted);
+        }
+
+        @media (min-width: 768px) {
+            .services-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .service-item {
+            background: var(--bg);
+            padding: 2rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .service-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: var(--accent);
+            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 0;
+        }
+
+        .service-item:hover::before {
+            left: 0;
+        }
+
+        .service-item:hover {
+            color: var(--primary);
+        }
+
+        .service-item h3, .service-item p {
+            position: relative;
+            z-index: 1;
+        }
+
+        .service-item h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .service-item p {
+            font-size: 0.875rem;
+            color: var(--muted);
+            transition: color 0.3s;
+        }
+
+        .service-item:hover p {
+            color: var(--primary);
+        }
+
+        /* About Section */
+        .about {
+            background: var(--primary);
+            padding: 4rem 1.5rem;
+        }
+
+        .about-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 3rem;
+            align-items: center;
+        }
+
+        @media (min-width: 768px) {
+            .about-inner {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .about-text {
+            font-size: 1rem;
+            line-height: 1.8;
+        }
+
+        .about-image {
+            position: relative;
+        }
+
+        .about-image img {
+            width: 100%;
+            height: auto;
+            display: block;
+            filter: grayscale(100%);
+            transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .about-image:hover img {
+            filter: grayscale(0%);
+        }
+
+        .about-image::after {
+            content: '';
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            right: -1rem;
+            bottom: -1rem;
+            border: 4px solid var(--accent);
+            z-index: -1;
+        }
+
+        /* Gallery */
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px;
+            margin-top: 4rem;
+        }
+
+        .gallery img {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            filter: grayscale(100%);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .gallery img:hover {
+            filter: grayscale(0%);
+            transform: scale(1.05);
+        }
+
+        /* Footer */
+        footer {
+            background: var(--primary);
+            padding: 4rem 1.5rem 2rem;
+            text-align: center;
+            border-top: 4px solid var(--accent);
+        }
+
+        .footer-logo {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .footer-logo span {
+            color: var(--accent);
+        }
+
+        .footer-disclaimer {
+            font-size: 0.75rem;
+            color: var(--muted);
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--muted);
+        }
+
+        /* Animations */
+        .fade-in {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .fade-in.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Text Scramble Effect */
+        .scramble {
+            display: inline-block;
+        }
+
+        /* Mobile cursor fix */
+        @media (hover: none) {
+            .cursor, .cursor-dot {
+                display: none;
+            }
+            body {
+                cursor: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="cursor"></div>
+    <div class="cursor-dot"></div>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>
+                <span class="scramble" data-text="CUTS">CUTS</span>
+                THAT SPEAK
+            </h1>
+            <div class="rating">
+                ★ 4.7/5 — 208 REVIEWS
+            </div>
+        </div>
+    </section>
+
+    <!-- Marquee -->
+    <div class="marquee-container">
+        <div class="marquee">
+            <span>SHARP • NO-NONSENSE • RELIABLE • NEIGHBORHOOD • ACCOMMODATING •</span>
+            <span>SHARP • NO-NONSENSE • RELIABLE • NEIGHBORHOOD • ACCOMMODATING •</span>
+            <span>SHARP • NO-NONSENSE • RELIABLE • NEIGHBORHOOD • ACCOMMODATING •</span>
+            <span>SHARP • NO-NONSENSE • RELIABLE • NEIGHBORHOOD • ACCOMMODATING •</span>
+        </div>
+    </div>
+
+    <!-- Contact -->
+    <section class="contact">
+        <div class="contact-inner">
+            <h2 class="section-title fade-in">CONTACT</h2>
+            <div class="contact-grid">
+                <div class="contact-item fade-in">
+                    <h3>PHONE</h3>
+                    <a href="tel:+15123827399">(512) 382-7399</a>
+                </div>
+                <div class="contact-item fade-in">
+                    <h3>LOCATION</h3>
+                    <p>Austin, TX</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Hours -->
+    <section class="hours">
+        <h2 class="section-title fade-in">HOURS</h2>
+        <div class="hours-grid fade-in">
+            <div class="hours-row">
+                <span>MONDAY</span>
+                <span>9:00 AM – 9:30 PM</span>
+            </div>
+            <div class="hours-row">
+                <span>TUESDAY</span>
+                <span>10:00 AM – 9:30 PM</span>
+            </div>
+            <div class="hours-row">
+                <span>WEDNESDAY</span>
+                <span>9:00 AM – 9:30 PM</span>
+            </div>
+            <div class="hours-row">
+                <span>THURSDAY</span>
+                <span>9:00 AM – 9:30 PM</span>
+            </div>
+            <div class="hours-row">
+                <span>FRIDAY</span>
+                <span>9:00 AM – 10:30 PM</span>
+            </div>
+            <div class="hours-row">
+                <span>SATURDAY</span>
+                <span>9:00 AM – 11:00 PM</span>
+            </div>
+            <div class="hours-row">
+                <span>SUNDAY</span>
+                <span>10:00 AM – 8:00 PM</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Reviews -->
+    <section class="reviews">
+        <div class="reviews-inner">
+            <h2 class="section-title fade-in">WHAT THEY SAY</h2>
+            
+            <div class="review-card fade-in">
+                <p class="review-text">"Tony worked his magic and left me looking like a brand-new person after a long week. Accommodating as always, he fit me in last minute without hesitation and had me looking sharp as a steak knife."</p>
+                <span class="review-author">— Carlos Garcia Gallardo</span>
+            </div>
+            
+            <div class="review-card fade-in">
+                <p class="review-text">"Carlos Rodriguez! A++++ and the main reason I come to this location. He does quality cuts and most IMPORTANTLY his attention to cleaning his clippers, using new blades is excellent!"</p>
+                <span class="review-author">— B H</span>
+            </div>
+            
+            <div class="review-card fade-in">
+                <p class="review-text">"Here from Oklahoma needed to get a quick cut but I'm very picky about who cuts my hair. Looked online barbershops close to me seen the cuts Henry did he did great got me in and out and was very friendly. Next time I'm in Austin Tx I will be back for sure!"</p>
+                <span class="review-author">— Eric Williams</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Services -->
+    <section class="services">
+        <h2 class="section-title fade-in">SERVICES</h2>
+        <div class="services-grid fade-in">
+            <div class="service-item">
+                <h3>PRECISION FADES</h3>
+                <p>Clean lines and smooth transitions. Tony's specialty — tight work that lasts.</p>
+            </div>
+            <div class="service-item">
+                <h3>BEARD SHAPING</h3>
+                <p>From a quick cleanup to a full sculpt. Straight razor edges included.</p>
+            </div>
+            <div class="service-item">
+                <h3>CLASSIC CUTS</h3>
+                <p>Scissors or clippers. Tell us what you want, we'll get it done right.</p>
+            </div>
+            <div class="service-item">
+                <h3>EDGE UPS</h3>
+                <p>Sharp lines around the hairline and neck. In the chair and out.</p>
+            </div>
+            <div class="service-item">
+                <h3>KIDS CUTS</h3>
+                <p>Patient barbers who know how to keep it quick and easy.</p>
+            </div>
+            <div class="service-item">
+                <h3>WALK-INS</h3>
+                <p>No appointment? No problem. If there's a chair open, sit down.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- About -->
+    <section class="about">
+        <div class="about-inner">
+            <div class="about-content fade-in">
+                <h2 class="section-title">ABOUT</h2>
+                <p class="about-text">
+                    I've been cutting hair in Austin long enough to know what matters: showing up, doing the work, and getting you out looking better than when you walked in. This isn't a chain. Each barber here has their own regulars, their own style, their own chair. People drive across town for Carlos. They wait for Tony. That's how it should be. Find your guy, stick with him. We keep the clippers clean, the blades fresh, and the conversation real. Open late because life doesn't always fit a 9-to-5. Walk-ins welcome, appointments available. Neighborhood spot, neighborhood prices.
+                </p>
+            </div>
+            <div class="about-image fade-in">
+                <img src="https://places.googleapis.com/v1/places/ChIJ3w-qXhXLRIYRzdD0Dv33mKY/photos/Ab43m-vvnLd4M4K-563wA04rrybTai7p2VyRsSd5RdolohrZ6qJrFr3pc7OkWnu9PL9UP_pzZeYMPn-U074wbG4X6EXg7-1fytlTY9G2xTcDthzhL9Unl1G_QfrXp_UkacPd92kyF-ZujcYoB9AJqDNPjZv2zWPKKUKajT5L-OP76sWg1cy3bFz9UzoKW_3ysWihOINDPJAp1LtE6mGbr_Tw4CXX98withwzUEg7cHhiv3O4q0pRtjAlBetYfgjRlxBKtSEfz2tMoKze-8gIJStO-wTLgfJiSqYIJWqhfOsVS8-FJnY8EJSm7KuHAT_7roSU4ZU2ZozPEgK68AapjrzenwVm8FuwEeJxsucQoxKaZZLtD6YH_3GcsxFJTvF_Jx1e99sRbfCQEAYgkXzd9pX5B0HKZCP8hyB4j6hIO_bAB82sX28/media?maxWidthPx=800&key=AIzaSyBrfv-UZjIJx_kaj8AeU78gXsgA_KfL22s" alt="Inside The Barber Shop Austin 35">
+            </div>
+        </div>
+        
+        <div class="gallery">
+            <img src="https://places.googleapis.com/v1/places/ChIJ3w-qXhXLRIYRzdD0Dv33mKY/photos/Ab43m-tNFCO8BUbCK3-uXiwq1KNl-4w53EoDhTcBXnZi7rFFUAXpnyI1VRk5kk6Fp2JrVykg3KA5FCKJHyXTZjPTis2w8N7pnm3gF4nAhT1qT0eGk_R_Vb4iJVKpYqCVBDce-EEYE1CRLH3YQFWaN44NBkp79TY0bAkjufEHum3Gt48ysa15VN-uss-OpmjLGZbjrWYN-faJ9IXb3IC0NjN-_bPKFQWrC2-jEFYM4PJH2f-DdKSvgIlya2G0j9drDdgo8acshgYMyHwF2kVRlbe1WYT_Lana-IPx3_aFkp_85g6JxA/media?maxWidthPx=800&key=AIzaSyBrfv-UZjIJx_kaj8AeU78gXsgA_KfL22s" alt="Barber Shop Interior" class="fade-in">
+            <img src="https://places.googleapis.com/v1/places/ChIJ3w-qXhXLRIYRzdD0Dv33mKY/photos/Ab43m-vvnLd4M4K-563wA04rrybTai7p2VyRsSd5RdolohrZ6qJrFr3pc7OkWnu9PL9UP_pzZeYMPn-U074wbG4X6EXg7-1fytlTY9G2xTcDthzhL9Unl1G_QfrXp_UkacPd92kyF-ZujcYoB9AJqDNPjZv2zWPKKUKajT5L-OP76sWg1cy3bFz9UzoKW_3ysWihOINDPJAp1LtE6mGbr_Tw4CXX98withwzUEg7cHhiv3O4q0pRtjAlBetYfgjRlxBKtSEfz2tMoKze-8gIJStO-wTLgfJiSqYIJWqhfOsVS8-FJnY8EJSm7KuHAT_7roSU4ZU2ZozPEgK68AapjrzenwVm8FuwEeJxsucQoxKaZZLtD6YH_3GcsxFJTvF_Jx1e99sRbfCQEAYgkXzd9pX5B0HKZCP8hyB4j6hIO_bAB82sX28/media?maxWidthPx=800&key=AIzaSyBrfv-UZjIJx_kaj8AeU78gXsgA_KfL22s" alt="Barber at Work" class="fade-in">
+            <img src="https://places.googleapis.com/v1/places/ChIJ3w-qXhXLRIYRzdD0Dv33mKY/photos/Ab43m-t_PfUggfieOa6hvp52Dh3osmPaJ-tQkygXOTCjAq1e5bJxEKOJ9WmV1pznCya71tCg05CBczWsTcHwRDptM3Q55SKAmN0BsJ1Id5IBobnD8w7PzqL03oSLvHUuTX3etZLbjId72eQtGZXfW5z2gHiP2KiReBqQ_rSLP3va96jGa9C3tihsI5nVdXir0Piig6QpbuxydugSg0nR1ND17H-NttIUxmL-e-FzBjo_VO3EyBNFk6QTwMDEYl1eSIgRMhf4jMidw8dyTLCoTjRZFp5Tj-qjI5CxjeNWkvTYIXMUpg/media?maxWidthPx=800&key=AIzaSyBrfv-UZjIJx_kaj8AeU78gXsgA_KfL22s" alt="Shop Exterior" class="fade-in">
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-logo">THE BARBER SHOP <span>35</span></div>
+        <p>Austin, TX</p>
+        <p class="footer-disclaimer">Built as a free preview — not affiliated with The Barber Shop Austin 35</p>
+    </footer>
+
+    <script>
+        // Custom Cursor
+        const cursor = document.querySelector('.cursor');
+        const cursorDot = document.querySelector('.cursor-dot');
+
+        document.addEventListener('mousemove', (e) => {
+            cursor.style.left = e.clientX + 'px';
+            cursor.style.top = e.clientY + 'px';
+            cursorDot.style.left = e.clientX + 'px';
+            cursorDot.style.top = e.clientY + 'px';
+        });
+
+        // Cursor hover effect
+        const hoverElements = document.querySelectorAll('a, button, .contact-item, .service-item, .hours-row');
+        hoverElements.forEach(el => {
+            el.addEventListener('mouseenter', () => cursor.classList.add('hover'));
+            el.addEventListener('mouseleave', () => cursor.classList.remove('hover'));
+        });
+
+        // Text Scramble Effect
+        class TextScramble {
+            constructor(el) {
+                this.el = el;
+                this.chars = '!<>-_\\/[]{}—=+*^?#________';
+                this.update = this.update.bind(this);
+            }
+            
+            setText(newText) {
+                const oldText = this.el.innerText;
+                const
