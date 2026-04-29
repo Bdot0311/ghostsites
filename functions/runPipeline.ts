@@ -1,4 +1,4 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
+import { createClient } from 'npm:@base44/sdk@0.8.25';
 
 // ── Claude helper ──────────────────────────────────────────────────────────
 async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000): Promise<string> {
@@ -144,24 +144,10 @@ OUTPUT: Single HTML file, embedded style+script, no external CSS frameworks exce
   const subdomain = business.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
   const subdomain_url = `https://ghostsites.preview/${subdomain}`;
 
-  // Upload HTML as a file (too large for entity field)
-  const htmlBytes = new TextEncoder().encode(htmlContent);
-  const htmlBlob = new Blob([htmlBytes], { type: 'text/html' });
-  const formData = new FormData();
-  formData.append('file', htmlBlob, `${business.id}.html`);
-  const uploadRes = await fetch('https://api.base44.com/api/apps/' + Deno.env.get('BASE44_APP_ID') + '/uploadFile', {
-    method: 'POST',
-    headers: { 'x-api-key': Deno.env.get('BASE44_API_KEY') || '' },
-    body: formData,
-  });
-  let htmlUrl = subdomain_url;
-  if (uploadRes.ok) {
-    const uploadData = await uploadRes.json();
-    htmlUrl = uploadData.file_url || uploadData.url || subdomain_url;
-  }
+  const htmlUrl = subdomain_url; // HTML stored directly in full_html field
 
   const site = await base44.asServiceRole.entities.GeneratedSite.create({
-    business_id: business.id, subdomain_url, full_html: htmlUrl,
+    business_id: business.id, subdomain_url, full_html: htmlContent,
     design_archetype: archetype, color_palette_id: paletteId, typography_pair_id: typographyId,
     layout_variant: layout, section_order: sectionOrder, micro_interactions: microInteractions,
     imagery_treatment: 'CLEAN', design_fingerprint: finalFingerprint, hero_copy,
@@ -195,7 +181,10 @@ OUTPUT JSON ONLY: {"subject":"...","body":"..."}`;
 // ── Main handler ───────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = createClient({
+      appId: Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701',
+      serviceToken: Deno.env.get('BASE44_SERVICE_TOKEN') || '',
+    });
     const body = await req.json().catch(() => ({}));
     const { city, category, mode, business_id } = body;
 

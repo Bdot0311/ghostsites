@@ -1,8 +1,11 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
+import { createClient } from 'npm:@base44/sdk@0.8.25';
 
 Deno.serve(async (req) => {
   try {
-    const base44 = createClientFromRequest(req);
+    const base44 = createClient({
+      appId: Deno.env.get('BASE44_APP_ID') || '69efdfc7247e1585291f7701',
+      serviceToken: Deno.env.get('BASE44_SERVICE_TOKEN') || '',
+    });
     const { entity, id, data } = await req.json().catch(() => ({}));
     if (!entity || !id || !data) return Response.json({ error: 'entity, id, data required' }, { status: 400 });
     const entities: Record<string, unknown> = {
