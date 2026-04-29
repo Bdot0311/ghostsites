@@ -1,10 +1,16 @@
 import { useState, useEffect } from "react";
 
+const AGENT_APP_ID = "69efdfc7247e1585291f7701";
+const SERVICE_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGE5MjczZi0zMGFiLTRiMWItOGI1My0wMTY4YWEzYmExZjEiLCJjbGllbnRfaWQiOiI1MGE5MjczZi0zMGFiLTRiMWItOGI1My0wMTY4YWEzYmExZjEiLCJhcHBfaWQiOiI2OWVmZGZjNzI0N2UxNTg1MjkxZjc3MDEiLCJhdWQiOiJiYXNlNDRfYXBpIiwic2NvcGUiOiJhcHAuYWNjZXNzIiwiZXhwIjoxNzc3NDMyNDE2LCJpYXQiOjE3Nzc0Mjg4MTZ9.4vOh5smLZJ56GuVxzGgnqaoUoSUumayDKrXwPJ91hJ0";
+
 async function callFn(name, payload) {
   try {
-    const res = await fetch(`/functions/${name}`, {
+    const res = await fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/functions/${name}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-service-token": SERVICE_TOKEN,
+      },
       body: JSON.stringify(payload),
     });
     const text = await res.text();
