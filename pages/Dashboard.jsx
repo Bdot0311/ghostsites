@@ -2,37 +2,14 @@ import { useState, useEffect, useRef } from "react";
 
 const AGENT_APP_ID = "69efdfc7247e1585291f7701";
 
-// Token is fetched fresh on every page load from the backend
-// so it never expires from a hardcoded value
-let _cachedToken = null;
-async function getServiceToken() {
-  if (_cachedToken) return _cachedToken;
-  try {
-    const res = await fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/functions/getToken`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const data = await res.json();
-    if (data.token) { _cachedToken = data.token; return data.token; }
-  } catch (_) {}
-  return null;
-}
-
+// Backend functions use createClientFromRequest + asServiceRole internally,
+// so no auth header is needed from the frontend.
 async function callFn(name, payload) {
   try {
-    const tokenData = await getServiceToken();
-    // tokenData is either a JWT string or the app ID string
-    const isAppId = tokenData === AGENT_APP_ID;
-    const authHeaders = tokenData
-      ? (isAppId
-          ? { "X-App-Id": tokenData }
-          : { "Authorization": `Bearer ${tokenData}` })
-      : {};
     const res = await fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/functions/${name}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders },
-      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
     });
     const text = await res.text();
     try { return JSON.parse(text); } catch { return { error: text }; }
