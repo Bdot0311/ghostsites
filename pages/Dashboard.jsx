@@ -37,6 +37,9 @@ async function callFn(name, payload) {
   }
 }
 
+const STATUS_COLORS = {
+  scraped: "bg-gray-700 text-gray-300",
+  site_generated: "bg-blue-100 text-blue-700",
   email_sent: "bg-purple-100 text-purple-700",
   opened: "bg-yellow-100 text-yellow-800",
   replied: "bg-green-100 text-green-700",
