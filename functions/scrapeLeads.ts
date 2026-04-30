@@ -1,28 +1,10 @@
-const APP_ID = '69efdfc7247e1585291f7701';
-const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
-
-async function dbCreate(entity: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const r = await fetch(`${BASE_URL}/entities/${entity}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-App-Id': APP_ID },
-    body: JSON.stringify(data),
-  });
-  if (!r.ok) throw new Error(`DB create ${entity} failed: ${await r.text()}`);
-  return r.json();
-}
-
-async function dbFilter(entity: string, filters: Record<string, unknown>): Promise<unknown[]> {
-  const r = await fetch(`${BASE_URL}/entities/${entity}/filter`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-App-Id': APP_ID },
-    body: JSON.stringify(filters),
-  });
-  if (!r.ok) throw new Error(`DB filter ${entity} failed: ${await r.text()}`);
-  return r.json();
-}
+import { createClientFromRequest } from "npm:@base44/sdk";
 
 Deno.serve(async (req) => {
   try {
+    const base44 = createClientFromRequest(req);
+    const db = base44.asServiceRole.entities;
+
     const { city, category } = await req.json().catch(() => ({}));
     if (!city || !category) return Response.json({ error: 'city and category required' }, { status: 400 });
 
@@ -51,8 +33,8 @@ Deno.serve(async (req) => {
     const saved: string[] = [];
     for (const pl of allPlaces) {
       if (pl.websiteUri || pl.businessStatus === 'PERMANENTLY_CLOSED') continue;
-      const existing = await dbFilter('Business', { google_place_id: pl.id as string }) as unknown[];
-      if (existing?.length > 0) continue;
+      const existing = await db.Business.filter({ google_place_id: pl.id as string });
+      if ((existing as unknown[])?.length > 0) continue;
 
       let reviews: { author: string; text: string; rating: number }[] = [];
       try {
@@ -76,7 +58,7 @@ Deno.serve(async (req) => {
       const street = addrParts.slice(0, -3).join(',').trim() || addrParts[0]?.trim() || '';
       const stateCode = addrParts.slice(-2, -1)[0]?.trim().split(' ')[0] ?? '';
 
-      const created = await dbCreate('Business', {
+      const created = await db.Business.create({
         name: (pl.displayName as Record<string, string>)?.text ?? 'Unknown', category,
         address: street, city, state: stateCode,
         phone: (pl.nationalPhoneNumber as string) ?? '', email: '',

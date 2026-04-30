@@ -1,41 +1,6 @@
-const APP_ID = '69efdfc7247e1585291f7701';
-const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
-const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
+import { createClientFromRequest } from "npm:@base44/sdk";
 
-function authHeaders(token: string) {
-  if (token.startsWith('eyJ')) {
-    return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
-  }
-  return { 'X-App-Id': token, 'Content-Type': 'application/json' };
-}
-async function dbList(entity: string, token: string): Promise<unknown[]> {
-  const r = await fetch(`${BASE_URL}/entities/${entity}`, { headers: authHeaders(token) });
-  if (!r.ok) throw new Error(`List ${entity} failed: ${await r.text()}`);
-  return r.json();
-}
-async function dbGet(entity: string, id: string, token: string): Promise<Record<string, unknown>> {
-  const r = await fetch(`${BASE_URL}/entities/${entity}/${id}`, { headers: authHeaders(token) });
-  if (!r.ok) throw new Error(`Get ${entity} failed: ${await r.text()}`);
-  return r.json();
-}
-async function dbCreate(entity: string, data: Record<string, unknown>, token: string): Promise<Record<string, unknown>> {
-  const r = await fetch(`${BASE_URL}/entities/${entity}`, {
-    method: 'POST', headers: authHeaders(token), body: JSON.stringify(data),
-  });
-  if (!r.ok) throw new Error(`Create ${entity} failed: ${await r.text()}`);
-  return r.json();
-}
-async function dbUpdate(entity: string, id: string, data: Record<string, unknown>, token: string): Promise<void> {
-  const r = await fetch(`${BASE_URL}/entities/${entity}/${id}`, {
-    method: 'PUT', headers: authHeaders(token), body: JSON.stringify(data),
-  });
-  if (!r.ok) throw new Error(`Update ${entity} failed: ${await r.text()}`);
-}
-function getToken(req: Request): string {
-  const auth = req.headers.get('Authorization') || '';
-  if (auth.startsWith('Bearer ')) return auth.replace('Bearer ', '');
-  return req.headers.get('X-App-Id') || req.headers.get('x-service-token') || '';
-}
+const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
 
 async function callClaude(apiKey: string, system: string, user: string): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -90,72 +55,65 @@ const A2L: Record<string,string[]> = {
   "Photo-First":["FULL_BLEED_HERO","MAGAZINE_GRID"],
   "Retro":["ASYMMETRIC_STACK","SCROLL_FLOW","MAGAZINE_GRID"],
 };
-function pick<T>(a:T[]): T { return a[Math.floor(Math.random()*a.length)]; }
+function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
 Deno.serve(async (req) => {
   try {
-    const token = getToken(req);
-    if (!token) return Response.json({ error: 'No auth token' }, { status: 401 });
+    const base44 = createClientFromRequest(req);
+    const db = base44.asServiceRole.entities;
+
     const { business_id } = await req.json().catch(() => ({}));
     if (!business_id) return Response.json({ error: 'business_id required' }, { status: 400 });
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
     if (!apiKey) return Response.json({ error: 'ANTHROPIC_API_KEY not set' }, { status: 500 });
 
-    const business = await dbGet('Business', business_id, token);
+    const business = await db.Business.get(business_id);
     if (!business.personality_profile) return Response.json({ error: 'Run personality analysis first' }, { status: 400 });
-    const profile = business.personality_profile as Record<string,unknown>;
+    const profile = business.personality_profile as Record<string, unknown>;
 
-    const existingSites = await dbList('GeneratedSite', token) as {design_fingerprint:string}[];
-    const existingFP = existingSites.map(s=>s.design_fingerprint).filter(Boolean);
+    const existingSites = await db.GeneratedSite.list() as { design_fingerprint: string }[];
+    const existingFP = existingSites.map(s => s.design_fingerprint).filter(Boolean);
 
     const arch = (profile.design_archetype as string) || 'Warm Local';
-    let palId = pick(A2P[arch]||[8]);
-    let typId = pick(A2T[arch]||[1]);
-    const layout = pick(A2L[arch]||['SCROLL_FLOW']);
+    let palId = pick(A2P[arch] || [8]);
+    let typId = pick(A2T[arch] || [1]);
+    const layout = pick(A2L[arch] || ['SCROLL_FLOW']);
     if (existingFP.includes(`${arch}-${palId}-${typId}-${layout}`)) {
-      palId = pick((A2P[arch]||[8]).filter((p:number)=>p!==palId)) ?? palId;
-      typId = pick((A2T[arch]||[1]).filter((t:number)=>t!==typId)) ?? typId;
+      palId = pick((A2P[arch] || [8]).filter((p: number) => p !== palId)) ?? palId;
+      typId = pick((A2T[arch] || [1]).filter((t: number) => t !== typId)) ?? typId;
     }
-    const pal = PALETTES[palId]||PALETTES[8];
-    const typ = TYPO[typId]||TYPO[1];
+    const pal = PALETTES[palId] || PALETTES[8];
+    const typ = TYPO[typId] || TYPO[1];
     const fp = `${arch}-${palId}-${typId}-${layout}-${Date.now()}`;
-    const reviews = ((business.top_reviews as {author:string;text:string}[])||[]).slice(0,3)
-      .map(r=>`"${r.text.slice(0,150)}" — ${r.author}`).join('\n');
+    const reviews = ((business.top_reviews as { author: string; text: string }[]) || []).slice(0, 3)
+      .map(r => `"${r.text.slice(0, 150)}" — ${r.author}`).join('\n');
 
     const sys = `You are a web designer. Output ONE complete HTML file. Raw HTML only — no markdown fences, no explanation.
-
 CRITICAL RULES:
 1. First character must be < of <!DOCTYPE html>. Last must be > of </html>.
 2. ZERO JavaScript. No <script> tags. CSS animations only.
 3. One <style> block in <head>. One Google Fonts <link> in <head>.
 4. Real business data only. No placeholder text.
 5. Stay under 5000 tokens total.
-
 COLORS: bg=${pal.bg} | text=${pal.text} | accent=${pal.accent} | muted=${pal.muted}
 FONTS: heading="${typ.h}" | body="${typ.b}"
 LAYOUT: ${layout}
-
 Sections: nav · hero · about · services (4-6 items) · reviews (2-3 quotes) · hours+contact · footer
 Hero headline: 4-7 words, punchy. NOT "Welcome to [name]".
 Footer: "Built as a free preview — not affiliated with ${business.name as string}"`;
 
-    const usr = `${business.name as string} | ${business.category as string} | ${business.city as string}${business.state?', '+business.state:''}
-Phone: ${business.phone||'N/A'} | Hours: ${((business.hours as string)||'Call for hours').slice(0,150)}
+    const usr = `${business.name as string} | ${business.category as string} | ${business.city as string}${business.state ? ', ' + business.state : ''}
+Phone: ${business.phone || 'N/A'} | Hours: ${((business.hours as string) || 'Call for hours').slice(0, 150)}
 Rating: ${business.rating}/5 (${business.review_count} reviews)
 Vibe: ${arch} — ${profile.tone_of_voice as string}
 Differentiator: ${profile.key_differentiator as string}
-Keywords: ${((profile.personality_keywords as string[])||[]).join(', ')}
-
+Keywords: ${((profile.personality_keywords as string[]) || []).join(', ')}
 Reviews:
 ${reviews}
-
 Google Fonts URL: https://fonts.googleapis.com/css2?family=${typ.gf}&display=swap
-
 Output the complete HTML file now.`;
 
     let html = await callClaude(apiKey, sys, usr);
-
-    // Strip markdown fences if Claude adds them despite instructions
     html = html.replace(/^```html\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
     if (!html.startsWith('<!DOCTYPE') && !html.startsWith('<html')) {
       const docIdx = html.indexOf('<!DOCTYPE');
@@ -163,33 +121,28 @@ Output the complete HTML file now.`;
       const start = docIdx >= 0 ? docIdx : htmlIdx >= 0 ? htmlIdx : 0;
       html = html.slice(start);
     }
-    if (!html.includes('</html>')) { if (!html.includes('</body>')) html+='\n</body>'; html+='\n</html>'; }
+    if (!html.includes('</html>')) { if (!html.includes('</body>')) html += '\n</body>'; html += '\n</html>'; }
 
     const heroMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-    const hero_copy = heroMatch ? heroMatch[1].replace(/<[^>]+>/g,'').trim() : '';
+    const hero_copy = heroMatch ? heroMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
-    // Store raw HTML in the DB — the SitePreview page renders it via dangerouslySetInnerHTML
-    const site = await dbCreate('GeneratedSite', {
-      business_id,
-      full_html: html,       // raw HTML — not a file URL
-      subdomain_url: '',     // filled in after we have the id
+    const site = await db.GeneratedSite.create({
+      business_id, full_html: html, subdomain_url: '',
       design_archetype: arch, color_palette_id: palId, typography_pair_id: typId,
-      layout_variant: layout, section_order: ['About','Services','Reviews','Hours','Contact'],
+      layout_variant: layout, section_order: ['About', 'Services', 'Reviews', 'Hours', 'Contact'],
       micro_interactions: [], imagery_treatment: 'CLEAN', design_fingerprint: fp,
-      hero_copy, about_copy:'', services_copy:'', cta_copy:'',
+      hero_copy, about_copy: '', services_copy: '', cta_copy: '',
       generated_at: new Date().toISOString(), view_count: 0,
-    }, token);
+    });
 
-    // Build the real hosted URL — the SitePreview page at the mini-app
-    const previewUrl = `${MINI_APP_URL}/SitePreview?id=${(site as Record<string,unknown>).id}`;
-    await dbUpdate('GeneratedSite', (site as Record<string,unknown>).id as string, { subdomain_url: previewUrl }, token);
-    await dbUpdate('Business', business_id, { status: 'site_generated' }, token);
+    const previewUrl = `${MINI_APP_URL}/SitePreview?id=${site.id}`;
+    await db.GeneratedSite.update(site.id as string, { subdomain_url: previewUrl });
+    await db.Business.update(business_id, { status: 'site_generated' });
 
     return Response.json({
-      success: true,
-      site_id: (site as Record<string,unknown>).id,
+      success: true, site_id: site.id,
       subdomain_url: previewUrl,
-      layout, palette: pal.name, typography: typ.name, design_archetype: arch,
+      layout, palette: pal.name, typography: typ.name, archetype: arch,
     });
   } catch (err: unknown) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
