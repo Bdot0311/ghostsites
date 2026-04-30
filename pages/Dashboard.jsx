@@ -1,15 +1,32 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const AGENT_APP_ID = "69efdfc7247e1585291f7701";
-const SERVICE_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MGE5MjczZi0zMGFiLTRiMWItOGI1My0wMTY4YWEzYmExZjEiLCJjbGllbnRfaWQiOiI1MGE5MjczZi0zMGFiLTRiMWItOGI1My0wMTY4YWEzYmExZjEiLCJhcHBfaWQiOiI2OWVmZGZjNzI0N2UxNTg1MjkxZjc3MDEiLCJhdWQiOiJiYXNlNDRfYXBpIiwic2NvcGUiOiJhcHAuYWNjZXNzIiwiZXhwIjoxNzc3NDMyNDE2LCJpYXQiOjE3Nzc0Mjg4MTZ9.4vOh5smLZJ56GuVxzGgnqaoUoSUumayDKrXwPJ91hJ0";
+
+// Token is fetched fresh on every page load from the backend
+// so it never expires from a hardcoded value
+let _cachedToken = null;
+async function getServiceToken() {
+  if (_cachedToken) return _cachedToken;
+  try {
+    const res = await fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/functions/getToken`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    if (data.token) { _cachedToken = data.token; return data.token; }
+  } catch (_) {}
+  return null;
+}
 
 async function callFn(name, payload) {
   try {
+    const token = await getServiceToken();
     const res = await fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/functions/${name}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-service-token": SERVICE_TOKEN,
+        ...(token ? { "Authorization": `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(payload),
     });
@@ -20,9 +37,6 @@ async function callFn(name, payload) {
   }
 }
 
-const STATUS_COLORS = {
-  scraped: "bg-gray-100 text-gray-700",
-  site_generated: "bg-blue-100 text-blue-700",
   email_sent: "bg-purple-100 text-purple-700",
   opened: "bg-yellow-100 text-yellow-800",
   replied: "bg-green-100 text-green-700",

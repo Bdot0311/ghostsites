@@ -1,19 +1,23 @@
 const APP_ID = '69efdfc7247e1585291f7701';
 const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
-
-async function dbList(entity: string): Promise<unknown[]> {
-  const r = await fetch(`${BASE_URL}/entities/${entity}`, { headers: { 'X-App-Id': APP_ID } });
-  if (!r.ok) throw new Error(`DB list ${entity} failed: ${await r.text()}`);
+function getToken(req: Request): string {
+  return (req.headers.get('Authorization') || req.headers.get('x-service-token') || '').replace('Bearer ', '');
+}
+async function dbList(entity: string, token: string): Promise<unknown[]> {
+  const r = await fetch(`${BASE_URL}/entities/${entity}`, { headers: { 'Authorization': `Bearer ${token}` } });
+  if (!r.ok) throw new Error(`List ${entity} failed: ${await r.text()}`);
   return r.json();
 }
 
-Deno.serve(async (_req) => {
+Deno.serve(async (req) => {
   try {
+    const token = getToken(req);
+    if (!token) return Response.json({ error: 'No auth token' }, { status: 401 });
     const [businesses, sites, campaigns, emailCampaigns] = await Promise.all([
-      dbList('Business'),
-      dbList('GeneratedSite'),
-      dbList('Campaign'),
-      dbList('EmailCampaign'),
+      dbList('Business', token),
+      dbList('GeneratedSite', token),
+      dbList('Campaign', token),
+      dbList('EmailCampaign', token),
     ]);
     return Response.json({ businesses, sites, campaigns, emailCampaigns });
   } catch (err: unknown) {
