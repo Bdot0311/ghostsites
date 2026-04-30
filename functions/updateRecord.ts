@@ -1,7 +1,15 @@
 const APP_ID = '69efdfc7247e1585291f7701';
 const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
+function authHeaders(token: string) {
+  if (token.startsWith('eyJ')) {
+    return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+  }
+  return { 'X-App-Id': token, 'Content-Type': 'application/json' };
+}
 function getToken(req: Request): string {
-  return (req.headers.get('Authorization') || req.headers.get('x-service-token') || '').replace('Bearer ', '');
+  const auth = req.headers.get('Authorization') || '';
+  if (auth.startsWith('Bearer ')) return auth.replace('Bearer ', '');
+  return req.headers.get('X-App-Id') || req.headers.get('x-service-token') || '';
 }
 
 Deno.serve(async (req) => {
@@ -12,7 +20,7 @@ Deno.serve(async (req) => {
     if (!entity || !id || !data) return Response.json({ error: 'entity, id, data required' }, { status: 400 });
     const r = await fetch(`${BASE_URL}/entities/${entity}/${id}`, {
       method: 'PUT',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: authHeaders(token),
       body: JSON.stringify(data),
     });
     if (!r.ok) throw new Error(`Update failed: ${await r.text()}`);

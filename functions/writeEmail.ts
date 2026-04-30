@@ -1,6 +1,6 @@
 const APP_ID = '69efdfc7247e1585291f7701';
 const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
-function authHeaders(token: string) { return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }; }
+function authHeaders(token: string) { if (token.startsWith('eyJ')) { return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }; } return { 'X-App-Id': token, 'Content-Type': 'application/json' }; }
 async function dbGet(entity: string, id: string, token: string): Promise<Record<string,unknown>> {
   const r = await fetch(`${BASE_URL}/entities/${entity}/${id}`, { headers: authHeaders(token) });
   if (!r.ok) throw new Error(`Get ${entity} failed: ${await r.text()}`);
@@ -18,7 +18,9 @@ async function dbCreate(entity: string, data: Record<string,unknown>, token: str
   return r.json();
 }
 function getToken(req: Request): string {
-  return (req.headers.get('Authorization') || req.headers.get('x-service-token') || '').replace('Bearer ', '');
+  const auth = req.headers.get('Authorization') || '';
+  if (auth.startsWith('Bearer ')) return auth.replace('Bearer ', '');
+  return req.headers.get('X-App-Id') || req.headers.get('x-service-token') || '';
 }
 async function callClaude(apiKey: string, system: string, user: string): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
