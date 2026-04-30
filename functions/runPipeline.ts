@@ -4,16 +4,21 @@ const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
 const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
 
 function authH(token: string) {
-  return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+  if (token.startsWith('eyJ')) {
+    return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+  }
+  return { 'X-App-Id': token, 'Content-Type': 'application/json' };
 }
 
 function getToken(req: Request): string {
-  return (req.headers.get('Authorization') || req.headers.get('x-service-token') || '').replace('Bearer ', '');
+  const auth = req.headers.get('Authorization') || '';
+  if (auth.startsWith('Bearer ')) return auth.replace('Bearer ', '');
+  return req.headers.get('X-App-Id') || req.headers.get('x-service-token') || '';
 }
 
 async function dbGet(entity: string, id: string, token: string): Promise<Record<string, unknown>> {
   const r = await fetch(`${BASE_URL}/entities/${entity}/${id}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
+    headers: authH(token),
   });
   if (!r.ok) throw new Error(`DB get ${entity}/${id} failed: ${await r.text()}`);
   return r.json();
@@ -22,7 +27,7 @@ async function dbGet(entity: string, id: string, token: string): Promise<Record<
 async function dbList(entity: string, token: string, query: Record<string, string> = {}): Promise<unknown[]> {
   const qs = Object.keys(query).length ? '?' + new URLSearchParams(query).toString() : '';
   const r = await fetch(`${BASE_URL}/entities/${entity}${qs}`, {
-    headers: { 'Authorization': `Bearer ${token}` },
+    headers: authH(token),
   });
   if (!r.ok) throw new Error(`DB list ${entity} failed: ${await r.text()}`);
   return r.json();

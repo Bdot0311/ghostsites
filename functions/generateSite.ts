@@ -3,7 +3,10 @@ const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
 const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
 
 function authHeaders(token: string) {
-  return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+  if (token.startsWith('eyJ')) {
+    return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+  }
+  return { 'X-App-Id': token, 'Content-Type': 'application/json' };
 }
 async function dbList(entity: string, token: string): Promise<unknown[]> {
   const r = await fetch(`${BASE_URL}/entities/${entity}`, { headers: authHeaders(token) });
@@ -29,7 +32,9 @@ async function dbUpdate(entity: string, id: string, data: Record<string, unknown
   if (!r.ok) throw new Error(`Update ${entity} failed: ${await r.text()}`);
 }
 function getToken(req: Request): string {
-  return (req.headers.get('Authorization') || req.headers.get('x-service-token') || '').replace('Bearer ', '');
+  const auth = req.headers.get('Authorization') || '';
+  if (auth.startsWith('Bearer ')) return auth.replace('Bearer ', '');
+  return req.headers.get('X-App-Id') || req.headers.get('x-service-token') || '';
 }
 
 async function callClaude(apiKey: string, system: string, user: string): Promise<string> {

@@ -21,13 +21,17 @@ async function getServiceToken() {
 
 async function callFn(name, payload) {
   try {
-    const token = await getServiceToken();
+    const tokenData = await getServiceToken();
+    // tokenData is either a JWT string or the app ID string
+    const isAppId = tokenData === AGENT_APP_ID;
+    const authHeaders = tokenData
+      ? (isAppId
+          ? { "X-App-Id": tokenData }
+          : { "Authorization": `Bearer ${tokenData}` })
+      : {};
     const res = await fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/functions/${name}`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { "Authorization": `Bearer ${token}` } : {}),
-      },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify(payload),
     });
     const text = await res.text();
