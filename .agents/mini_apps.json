@@ -2,11 +2,14 @@
   "app_id": "69efe31f5ccf6949d324f23e",
   "slug": "untitled-app-d324f23e",
   "pages": {
+    "Dashboard": {
+      "title": "Dashboard"
+    },
     "SitePreview": {
       "title": "SitePreview"
     },
-    "Dashboard": {
-      "title": "Dashboard"
+    "index": {
+      "title": "index"
     }
   }
 }
