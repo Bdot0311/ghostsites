@@ -1,5 +1,6 @@
 const APP_ID = '69efdfc7247e1585291f7701';
 const BASE_URL = `https://base44.app/api/apps/${APP_ID}`;
+const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
 
 function authHeaders(token: string) {
   return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -26,15 +27,6 @@ async function dbUpdate(entity: string, id: string, data: Record<string, unknown
     method: 'PUT', headers: authHeaders(token), body: JSON.stringify(data),
   });
   if (!r.ok) throw new Error(`Update ${entity} failed: ${await r.text()}`);
-}
-async function uploadHtml(html: string, filename: string, token: string): Promise<string> {
-  const form = new FormData();
-  form.append('file', new Blob([new TextEncoder().encode(html)], { type: 'text/html' }), filename);
-  const r = await fetch(`${BASE_URL}/integration-endpoints/Core/UploadFile`, {
-    method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: form,
-  });
-  if (!r.ok) throw new Error(`Upload failed: ${await r.text()}`);
-  return (await r.json()).file_url || '';
 }
 function getToken(req: Request): string {
   return (req.headers.get('Authorization') || req.headers.get('x-service-token') || '').replace('Bearer ', '');
@@ -125,12 +117,12 @@ Deno.serve(async (req) => {
     const reviews = ((business.top_reviews as {author:string;text:string}[])||[]).slice(0,3)
       .map(r=>`"${r.text.slice(0,150)}" — ${r.author}`).join('\n');
 
-    const sys = `You are a web designer. Output ONE complete HTML file. Raw HTML only — no markdown, no explanation.
+    const sys = `You are a web designer. Output ONE complete HTML file. Raw HTML only — no markdown fences, no explanation.
 
 CRITICAL RULES:
-1. Start: <!DOCTYPE html>  End: </html>
+1. First character must be < of <!DOCTYPE html>. Last must be > of </html>.
 2. ZERO JavaScript. No <script> tags. CSS animations only.
-3. One <style> block in <head>. One Google Fonts <link>.
+3. One <style> block in <head>. One Google Fonts <link> in <head>.
 4. Real business data only. No placeholder text.
 5. Stay under 5000 tokens total.
 
@@ -152,29 +144,48 @@ Keywords: ${((profile.personality_keywords as string[])||[]).join(', ')}
 Reviews:
 ${reviews}
 
-Fonts: https://fonts.googleapis.com/css2?family=${typ.gf}&display=swap
+Google Fonts URL: https://fonts.googleapis.com/css2?family=${typ.gf}&display=swap
 
-Output the complete HTML now.`;
+Output the complete HTML file now.`;
 
     let html = await callClaude(apiKey, sys, usr);
-    html = html.replace(/^```html\n?/i,'').replace(/^```\n?/,'').replace(/\n?```$/,'').trim();
+
+    // Strip markdown fences if Claude adds them despite instructions
+    html = html.replace(/^```html\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+    if (!html.startsWith('<!DOCTYPE') && !html.startsWith('<html')) {
+      const docIdx = html.indexOf('<!DOCTYPE');
+      const htmlIdx = html.indexOf('<html');
+      const start = docIdx >= 0 ? docIdx : htmlIdx >= 0 ? htmlIdx : 0;
+      html = html.slice(start);
+    }
     if (!html.includes('</html>')) { if (!html.includes('</body>')) html+='\n</body>'; html+='\n</html>'; }
 
     const heroMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
     const hero_copy = heroMatch ? heroMatch[1].replace(/<[^>]+>/g,'').trim() : '';
-    const url = await uploadHtml(html, `${business_id}-${Date.now()}.html`, token);
 
+    // Store raw HTML in the DB — the SitePreview page renders it via dangerouslySetInnerHTML
     const site = await dbCreate('GeneratedSite', {
-      business_id, subdomain_url: url, full_html: url,
+      business_id,
+      full_html: html,       // raw HTML — not a file URL
+      subdomain_url: '',     // filled in after we have the id
       design_archetype: arch, color_palette_id: palId, typography_pair_id: typId,
       layout_variant: layout, section_order: ['About','Services','Reviews','Hours','Contact'],
       micro_interactions: [], imagery_treatment: 'CLEAN', design_fingerprint: fp,
       hero_copy, about_copy:'', services_copy:'', cta_copy:'',
       generated_at: new Date().toISOString(), view_count: 0,
     }, token);
+
+    // Build the real hosted URL — the SitePreview page at the mini-app
+    const previewUrl = `${MINI_APP_URL}/SitePreview?id=${(site as Record<string,unknown>).id}`;
+    await dbUpdate('GeneratedSite', (site as Record<string,unknown>).id as string, { subdomain_url: previewUrl }, token);
     await dbUpdate('Business', business_id, { status: 'site_generated' }, token);
 
-    return Response.json({ success:true, site_id:(site as Record<string,unknown>).id, subdomain_url:url, layout, palette:pal.name, typography:typ.name, design_archetype:arch });
+    return Response.json({
+      success: true,
+      site_id: (site as Record<string,unknown>).id,
+      subdomain_url: previewUrl,
+      layout, palette: pal.name, typography: typ.name, design_archetype: arch,
+    });
   } catch (err: unknown) {
     return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
