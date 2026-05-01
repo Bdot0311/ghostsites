@@ -35,30 +35,40 @@ const COLOR_PALETTES: Record<number, { name: string; background: string; text: s
 const TYPOGRAPHY_PAIRS: Record<number, { name: string; heading_font: string; body_font: string; google_fonts: string }> = {
   1:  { name: "Fraunces + Inter",          heading_font: "Fraunces",         body_font: "Inter",          google_fonts: "Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Inter:wght@300;400;500;600" },
   2:  { name: "Playfair + Manrope",        heading_font: "Playfair Display", body_font: "Manrope",        google_fonts: "Playfair+Display:ital,wght@0,400..900;1,400..900&family=Manrope:wght@300;400;500;600" },
-  9:  { name: "Space Grotesk + JetBrains", heading_font: "Space Grotesk",    body_font: "JetBrains Mono", google_fonts: "Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400;700" },
+  9:  { name: "Space Grotesk + DM Sans",   heading_font: "Space Grotesk",    body_font: "DM Sans",        google_fonts: "Space+Grotesk:wght@300..700&family=DM+Sans:wght@300;400;500;600" },
   10: { name: "Archivo Black + Inter",     heading_font: "Archivo Black",    body_font: "Inter",          google_fonts: "Archivo+Black&family=Inter:wght@300;400;500;600" },
   18: { name: "Fraunces + Inter Warm",     heading_font: "Fraunces",         body_font: "Inter",          google_fonts: "Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Inter:wght@300;400;500;600" },
   20: { name: "Abril + Raleway",           heading_font: "Abril Fatface",    body_font: "Raleway",        google_fonts: "Abril+Fatface&family=Raleway:wght@300;400;600" },
 };
 const ARCHETYPE_PALETTE_MAP: Record<string, number[]> = {
-  "Editorial":["1","39"].map(Number),   "Soft Luxury":[2,4,8],    "Brutalist":[9,10,11],
-  "Modern Tech":[25],                   "Warm Local":[8,17,34,35], "Bold Minimal":[10,39],
-  "Photo-First":[39,1],                 "Retro":[17,18],
+  "Editorial":   [1, 39],
+  "Soft Luxury": [2, 4, 8],
+  "Brutalist":   [9, 10, 11],
+  "Modern Tech": [25, 9],
+  "Warm Local":  [8, 17, 34, 35],
+  "Bold Minimal":[10, 39, 1],
+  "Photo-First": [39, 1, 2],
+  "Retro":       [17, 18, 34],
 };
 const ARCHETYPE_TYPOGRAPHY_MAP: Record<string, number[]> = {
-  "Editorial":[1,2], "Soft Luxury":[1,2], "Brutalist":[9,10],
-  "Modern Tech":[9], "Warm Local":[18,20], "Bold Minimal":[10],
-  "Photo-First":[1,2], "Retro":[20],
+  "Editorial":   [1, 2],
+  "Soft Luxury": [1, 2, 20],
+  "Brutalist":   [9, 10],
+  "Modern Tech": [9, 10],
+  "Warm Local":  [18, 20, 1],
+  "Bold Minimal":[10, 9, 2],
+  "Photo-First": [1, 2, 20],
+  "Retro":       [20, 18, 2],
 };
 const ARCHETYPE_LAYOUT_MAP: Record<string, string[]> = {
-  "Editorial":["MAGAZINE_GRID","SPLIT_HERO","SCROLL_FLOW"],
-  "Soft Luxury":["CENTERED_HERO","SPLIT_HERO","SCROLL_FLOW"],
-  "Brutalist":["CENTERED_HERO","ASYMMETRIC_STACK","MAGAZINE_GRID"],
-  "Modern Tech":["SPLIT_HERO","CENTERED_HERO","SCROLL_FLOW"],
-  "Warm Local":["FULL_BLEED_HERO","SPLIT_HERO","SCROLL_FLOW"],
-  "Bold Minimal":["CENTERED_HERO","SPLIT_HERO"],
-  "Photo-First":["FULL_BLEED_HERO","MAGAZINE_GRID"],
-  "Retro":["ASYMMETRIC_STACK","SCROLL_FLOW","MAGAZINE_GRID"],
+  "Editorial":   ["MAGAZINE_GRID", "SPLIT_HERO", "SCROLL_FLOW"],
+  "Soft Luxury": ["CENTERED_HERO", "SPLIT_HERO", "SCROLL_FLOW"],
+  "Brutalist":   ["CENTERED_HERO", "ASYMMETRIC_STACK", "MAGAZINE_GRID"],
+  "Modern Tech": ["SPLIT_HERO", "CENTERED_HERO", "SCROLL_FLOW"],
+  "Warm Local":  ["FULL_BLEED_HERO", "SPLIT_HERO", "SCROLL_FLOW"],
+  "Bold Minimal":["CENTERED_HERO", "SPLIT_HERO", "SCROLL_FLOW"],
+  "Photo-First": ["FULL_BLEED_HERO", "MAGAZINE_GRID", "SPLIT_HERO"],
+  "Retro":       ["ASYMMETRIC_STACK", "SCROLL_FLOW", "MAGAZINE_GRID"],
 };
 function pickRandom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 
@@ -68,7 +78,7 @@ async function analyzePersonality(business: any, apiKey: string, db: any) {
     .map((r: { author: string; text: string; rating: number }, i: number) =>
       `Review ${i+1} (${r.rating}/5) by ${r.author}: "${r.text}"`).join('\n');
   const system = `You are a brand strategist. Output JSON only.
-Archetypes: Barbers/mechanics/tattoo→Brutalist or Retro | Salons/spas/boutiques→Soft Luxury or Editorial | Bakeries/cafes→Warm Local | Diners/restaurants→Warm Local or Retro | Gyms/skate→Brutalist | Law/dental/finance→Editorial or Bold Minimal | Tech/IT→Modern Tech | Photographers/galleries→Photo-First | Bars/lounges→Editorial or Brutalist
+Archetypes: Barbers/salons/nail→Retro or Bold Minimal | Mechanics/auto→Retro or Brutalist | Tattoo studios→Brutalist or Editorial | Spas/boutiques/luxury→Soft Luxury | Bakeries/cafes/coffee→Warm Local | Diners/family restaurants→Warm Local or Retro | Gyms/fitness→Bold Minimal | Law/dental/medical/finance→Editorial or Bold Minimal | Tech/IT→Modern Tech | Photographers/galleries→Photo-First | Bars/breweries→Editorial or Retro | Landscaping/cleaning/trades→Warm Local or Bold Minimal
 JSON: {"personality_keywords":["a","b","c","d","e"],"design_archetype":"Brutalist","tone_of_voice":"one sentence","key_differentiator":"one thing","best_review_quote":{"text":"verbatim","author":"Name L."},"avoid":["x","y","z"]}`;
   const user = `Business: ${business.name}\nCategory: ${business.category}\nCity: ${business.city}${business.state?', '+business.state:''}\nRating: ${business.rating||'N/A'} (${business.review_count||0} reviews)\nReviews:\n${reviewsText||'None'}`;
   const profile = parseJSON(await callClaude(apiKey, system, user, 600, 'claude-haiku-4-5'));
@@ -100,29 +110,51 @@ async function generateSite(business: any, profile: any, apiKey: string, db: any
   const reviews = (business.top_reviews || []).slice(0, 3)
     .map((r: { text: string; author: string }) => `"${r.text.slice(0, 150)}" — ${r.author}`).join('\n');
 
-  const system = `You are a web designer. Output ONE complete HTML file. Raw HTML only — no markdown fences, no explanation.
+  const system = `You are a web designer building a site for a LOCAL SERVICE BUSINESS — a real neighborhood shop, not a tech startup or SaaS company.
+
+Output ONE complete HTML file. Raw HTML only — no markdown fences, no explanation.
+
 CRITICAL RULES:
 1. First character must be < of <!DOCTYPE html>. Last must be > of </html>.
 2. ZERO JavaScript. No <script> tags. CSS animations only.
 3. One <style> block in <head>. One Google Fonts <link> in <head>.
-4. Real business data only. No placeholder text.
+4. Real business data only — phone, hours, address, actual review quotes. No placeholder text ever.
 5. Stay under 5000 tokens total.
+
+AESTHETIC — local business, NOT a startup:
+- Feel: warm, trustworthy, neighborhood pride. A real person owns this place.
+- DO NOT use: gradients on text, glassmorphism, "Book a Demo", feature grids, pricing tiers, parallax, or anything that screams tech/SaaS.
+- DO use: phone number big and prominent in the nav, real hours listed clearly, actual street address, genuine customer quotes.
+- Hero feels like a sign above a real shop door, not a VC pitch deck.
+- Services read like a menu or chalkboard list, not a feature comparison table.
+
 COLORS: background=${palette.background} | text=${palette.text} | accent=${palette.accent} | muted=${palette.muted}
 FONTS: heading="${typography.heading_font}" | body="${typography.body_font}"
 LAYOUT: ${layout}
-Sections: nav · hero · about · services (4-6 items) · reviews (2-3 quotes) · hours+contact · footer
-Hero headline: 4-7 words, punchy. NOT "Welcome to [name]".
+
+Sections: nav (business name + phone number) · hero · about (owner voice or shop personality) · services (4-6 with short descriptions) · reviews (2-3 real customer quotes with names) · hours + address + phone · footer
+Hero headline: 4-7 words capturing this specific shop's personality. NOT "Welcome to [name]". NOT a generic tagline.
 Footer: "Built as a free preview — not affiliated with ${business.name}"`;
 
   const user = `${business.name} | ${business.category} | ${business.city}${business.state ? ', ' + business.state : ''}
 Phone: ${business.phone || 'N/A'} | Hours: ${(business.hours || 'Call for hours').slice(0, 200)}
 Rating: ${business.rating}/5 (${business.review_count} reviews)
-Vibe: ${archetype} — ${profile.tone_of_voice || ''}
-Differentiator: ${profile.key_differentiator || ''}
-Keywords: ${(profile.personality_keywords || []).join(', ')}
-Reviews:
+Brand vibe: ${archetype} — ${profile.tone_of_voice || ''}
+What makes them different: ${profile.key_differentiator || ''}
+Personality words: ${(profile.personality_keywords || []).join(', ')}
+Things to avoid: ${(profile.avoid || []).join(', ')}
+
+Real customer reviews to quote directly:
 ${reviews}
-Google Fonts URL: https://fonts.googleapis.com/css2?family=${typography.google_fonts}&display=swap
+
+Google Fonts: https://fonts.googleapis.com/css2?family=${typography.google_fonts}&display=swap
+
+COPY RULES — make this site feel like THIS specific business, not a template:
+- Write the about section in the voice of the owner, referencing the actual city and neighborhood feel.
+- Pull specific details from the reviews above — if a customer mentioned something specific, use it.
+- Hero headline must reflect this shop's unique personality keywords above, not generic barbershop/salon/cafe language.
+- Every sentence should be something only THIS business could say.
+
 Output the complete HTML file now.`;
 
   let html = await callClaude(apiKey, system, user, 6000, 'claude-opus-4-5');
