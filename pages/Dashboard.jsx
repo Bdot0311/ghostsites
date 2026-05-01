@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const AGENT_APP_ID = "69efdfc7247e1585291f7701";
 
@@ -51,12 +51,25 @@ export default function Dashboard() {
   const [editEmail, setEditEmail] = useState(null);
   const [sending, setSending] = useState(false);
   const [filter, setFilter] = useState("all");
+  const [previewHtml, setPreviewHtml] = useState({});  // site_id -> fetched HTML string
 
   useEffect(() => {
     loadData();
     const interval = setInterval(loadData, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch the HTML content from the CDN URL when a site is selected for preview
+  useEffect(() => {
+    if (!selected) return;
+    const site = sites[selected.id];
+    if (!site?.full_html) return;
+    if (previewHtml[site.id]) return; // already cached
+    fetch(site.full_html)
+      .then(r => r.ok ? r.text() : Promise.reject(r.status))
+      .then(html => setPreviewHtml(prev => ({ ...prev, [site.id]: html })))
+      .catch(() => {});
+  }, [selected, sites]);
 
   async function loadData() {
     try {
@@ -346,14 +359,24 @@ export default function Dashboard() {
                       <span className="text-gray-500">{sites[selected.id].layout_variant?.replace(/_/g, " ")}</span>
                     </div>
                     <button onClick={() => {
-                      window.open(sites[selected.id].full_html, "_blank");
+                      window.open(sites[selected.id].subdomain_url, "_blank");
                     }} className="text-xs text-gray-400 hover:text-white px-2 py-1 bg-gray-800 rounded">
                       Open full ↗
                     </button>
                   </div>
                   <div className="h-72 overflow-hidden bg-gray-800">
-                    <iframe src={sites[selected.id].full_html} className="w-full h-full border-0 pointer-events-none"
-                      title="Site Preview" />
+                    {previewHtml[sites[selected.id].id] ? (
+                      <iframe
+                        srcDoc={previewHtml[sites[selected.id].id]}
+                        className="w-full h-full border-0 pointer-events-none"
+                        sandbox="allow-same-origin"
+                        title="Site Preview"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-600 text-sm">
+                        Loading preview...
+                      </div>
+                    )}
                   </div>
                   <div className="px-4 py-2 bg-gray-900 flex flex-wrap gap-3 text-xs text-gray-500">
                     <span>Palette <span className="text-gray-300">#{sites[selected.id].color_palette_id}</span></span>
