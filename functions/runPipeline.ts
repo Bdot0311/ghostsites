@@ -1,6 +1,22 @@
 import { createClientFromRequest } from "npm:@base44/sdk";
 
 const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
+const APP_ID = '69efdfc7247e1585291f7701';
+
+async function uploadHtml(html: string, filename: string): Promise<string> {
+  const bytes = new TextEncoder().encode(html);
+  const form = new FormData();
+  form.append('file', new Blob([bytes], { type: 'text/html' }), filename);
+  const r = await fetch(`https://base44.app/api/apps/${APP_ID}/integration-endpoints/Core/UploadFile`, {
+    method: 'POST',
+    headers: { 'X-App-Id': APP_ID },
+    body: form,
+  });
+  if (!r.ok) throw new Error(`File upload failed: ${await r.text()}`);
+  const { file_url } = await r.json();
+  if (!file_url) throw new Error('Upload returned no file_url');
+  return file_url;
+}
 
 async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-haiku-4-5'): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -140,8 +156,12 @@ Output the complete HTML file now.`;
   const heroMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
   const hero_copy = heroMatch ? heroMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
+  // Upload HTML as a file — the raw HTML is ~23KB which exceeds entity string field limits.
+  // full_html stores the CDN file URL (short string); SitePreview fetches the content from there.
+  const htmlFileUrl = await uploadHtml(html, `${business.id}-${Date.now()}.html`);
+
   const site = await db.GeneratedSite.create({
-    business_id: business.id, full_html: html, subdomain_url: '',
+    business_id: business.id, full_html: htmlFileUrl, subdomain_url: '',
     design_archetype: archetype, color_palette_id: paletteId, typography_pair_id: typographyId,
     layout_variant: layout, section_order: ['About','Services','Reviews','Hours','Contact'],
     micro_interactions: [], imagery_treatment: 'CLEAN', design_fingerprint: finalFingerprint,

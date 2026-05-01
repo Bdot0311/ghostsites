@@ -2,18 +2,6 @@ import { useState, useEffect } from "react";
 
 const AGENT_APP_ID = "69efdfc7247e1585291f7701";
 
-async function getServiceToken() {
-  try {
-    const res = await fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/functions/getToken`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const data = await res.json();
-    return data.token || null;
-  } catch (_) { return null; }
-}
-
 export default function SitePreview() {
   const [html, setHtml] = useState(null);
   const [error, setError] = useState(null);
@@ -29,33 +17,23 @@ export default function SitePreview() {
 
   async function loadSite(id) {
     try {
-      const token = await getServiceToken();
-      const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+      // getPreview uses service role internally — no user auth needed from the frontend.
+      // Returns { html_url, business_name } where html_url is a public CDN link.
       const res = await fetch(
-        `https://base44.app/api/apps/${AGENT_APP_ID}/entities/GeneratedSite/${id}`,
-        { headers }
+        `https://base44.app/api/apps/${AGENT_APP_ID}/functions/getPreview?id=${id}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }
       );
-      if (!res.ok) throw new Error(`Site not found (${res.status})`);
-      const site = await res.json();
-      if (!site.full_html) throw new Error("Site has no HTML content yet.");
+      if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      if (!data.html_url) throw new Error("Site has no HTML yet.");
 
-      // Increment view count
-      if (token) {
-        fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/entities/GeneratedSite/${id}`, {
-          method: "PUT",
-          headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ view_count: (site.view_count || 0) + 1 }),
-        }).catch(() => {});
-      }
+      setBusinessName(data.business_name || "");
 
-      // Fetch business name for the top bar
-      if (site.business_id && token) {
-        fetch(`https://base44.app/api/apps/${AGENT_APP_ID}/entities/Business/${site.business_id}`, {
-          headers: { "Authorization": `Bearer ${token}` },
-        }).then(r => r.json()).then(b => setBusinessName(b.name || "")).catch(() => {});
-      }
-
-      setHtml(site.full_html);
+      // Fetch the actual HTML content from the public CDN URL — no auth required
+      const htmlRes = await fetch(data.html_url);
+      if (!htmlRes.ok) throw new Error("Could not fetch site HTML.");
+      setHtml(await htmlRes.text());
     } catch (e) {
       setError(e.message);
     } finally {
@@ -84,7 +62,6 @@ export default function SitePreview() {
 
   return (
     <div style={{ fontFamily: "Inter, sans-serif" }}>
-      {/* GhostSites preview banner */}
       <div style={{
         position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
         background: "rgba(10,10,10,0.92)", backdropFilter: "blur(8px)",
@@ -105,16 +82,10 @@ export default function SitePreview() {
         </div>
       </div>
 
-      {/* The actual generated HTML rendered in an iframe for full isolation */}
       <div style={{ paddingTop: 42 }}>
         <iframe
           srcDoc={html}
-          style={{
-            width: "100%",
-            height: "calc(100vh - 42px)",
-            border: "none",
-            display: "block",
-          }}
+          style={{ width: "100%", height: "calc(100vh - 42px)", border: "none", display: "block" }}
           sandbox="allow-same-origin allow-forms"
           title="Site Preview"
         />
