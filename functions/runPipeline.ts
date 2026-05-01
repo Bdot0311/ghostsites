@@ -12,9 +12,12 @@ async function callClaude(apiKey: string, system: string, user: string, maxToken
   return (await res.json()).content[0].text;
 }
 function parseJSON(text: string) {
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('No JSON in Claude response');
-  return JSON.parse(m[0]);
+  // Try greedy match first (captures full nested object), then fall back to last valid JSON block
+  const greedy = text.match(/\{[\s\S]*\}/);
+  if (greedy) { try { return JSON.parse(greedy[0]); } catch (_) {} }
+  const blocks = [...text.matchAll(/\{[^{}]*\}/g)].reverse();
+  for (const m of blocks) { try { return JSON.parse(m[0]); } catch (_) {} }
+  throw new Error('No valid JSON in Claude response');
 }
 
 const COLOR_PALETTES: Record<number, { name: string; background: string; text: string; accent: string; muted: string }> = {
@@ -71,6 +74,7 @@ const ARCHETYPE_LAYOUT_MAP: Record<string, string[]> = {
   "Retro":       ["ASYMMETRIC_STACK", "SCROLL_FLOW", "MAGAZINE_GRID"],
 };
 function pickRandom<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+function shuffle<T>(arr: T[]): T[] { return [...arr].sort(() => Math.random() - 0.5); }
 
 // deno-lint-ignore no-explicit-any
 async function analyzePersonality(business: any, apiKey: string, db: any) {
@@ -91,20 +95,32 @@ async function generateSite(business: any, profile: any, apiKey: string, db: any
   const existingSites = await db.GeneratedSite.list();
   const existingFingerprints = (existingSites as { design_fingerprint: string }[]).map(s => s.design_fingerprint).filter(Boolean);
 
-  const archetype = profile.design_archetype || 'Warm Local';
-  const validPalettes = ARCHETYPE_PALETTE_MAP[archetype] || [8];
-  const validTypography = ARCHETYPE_TYPOGRAPHY_MAP[archetype] || [1];
-  const validLayouts = ARCHETYPE_LAYOUT_MAP[archetype] || ['SCROLL_FLOW'];
+  // Normalize archetype casing so Claude output variations still match map keys
+  const rawArchetype = (profile.design_archetype || 'Warm Local').trim();
+  const archetype = rawArchetype.split(' ')
+    .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 
-  let paletteId = pickRandom(validPalettes);
-  let typographyId = pickRandom(validTypography);
-  const layout = pickRandom(validLayouts);
-  const fingerprint = `${archetype}-${paletteId}-${typographyId}-${layout}`;
-  if (existingFingerprints.includes(fingerprint)) {
-    paletteId = pickRandom(validPalettes.filter((p: number) => p !== paletteId)) ?? paletteId;
-    typographyId = pickRandom(validTypography.filter((t: number) => t !== typographyId)) ?? typographyId;
+  const validPalettes = ARCHETYPE_PALETTE_MAP[archetype] || [8, 17, 34];
+  const validTypography = ARCHETYPE_TYPOGRAPHY_MAP[archetype] || [1, 2];
+  const validLayouts = ARCHETYPE_LAYOUT_MAP[archetype] || ['SCROLL_FLOW', 'SPLIT_HERO', 'CENTERED_HERO'];
+
+  // Pick the first unused combination so each site in a batch looks different
+  const usedFPs = new Set(existingFingerprints);
+  let paletteId = validPalettes[0];
+  let typographyId = validTypography[0];
+  let layout = validLayouts[0];
+  let finalFingerprint = `${archetype}-${paletteId}-${typographyId}-${layout}`;
+  outer: for (const p of shuffle(validPalettes)) {
+    for (const t of shuffle(validTypography)) {
+      for (const l of shuffle(validLayouts)) {
+        const fp = `${archetype}-${p}-${t}-${l}`;
+        if (!usedFPs.has(fp)) {
+          paletteId = p; typographyId = t; layout = l; finalFingerprint = fp;
+          break outer;
+        }
+      }
+    }
   }
-  const finalFingerprint = `${archetype}-${paletteId}-${typographyId}-${layout}-${Date.now()}`;
   const palette = COLOR_PALETTES[paletteId] || COLOR_PALETTES[8];
   const typography = TYPOGRAPHY_PAIRS[typographyId] || TYPOGRAPHY_PAIRS[1];
   const reviews = (business.top_reviews || []).slice(0, 3)
@@ -130,7 +146,8 @@ AESTHETIC — local business, NOT a startup:
 
 COLORS: background=${palette.background} | text=${palette.text} | accent=${palette.accent} | muted=${palette.muted}
 FONTS: heading="${typography.heading_font}" | body="${typography.body_font}"
-LAYOUT: ${layout}
+LAYOUT STYLE — ${layout}:
+${layout === 'FULL_BLEED_HERO' ? 'Large color block or bold background fills the top. Business name and phone overlaid big. No split columns in the hero.' : ''}${layout === 'SPLIT_HERO' ? 'Hero splits: bold text left, visual element or color block right. Grid layout, not stacked.' : ''}${layout === 'CENTERED_HERO' ? 'Everything center-aligned. Name, tagline, phone centered on a solid background. Simple and bold.' : ''}${layout === 'SCROLL_FLOW' ? 'Single column flowing layout, each section separated by color or whitespace. No complex grids.' : ''}${layout === 'MAGAZINE_GRID' ? 'Sections use alternating wide/narrow grid columns. Text-heavy, editorial. Think print magazine layout.' : ''}${layout === 'ASYMMETRIC_STACK' ? 'Sections stack with unequal left/right proportions — wide text column beside a narrow accent stripe. Bold whitespace.' : ''}
 
 Sections: nav (business name + phone number) · hero · about (owner voice or shop personality) · services (4-6 with short descriptions) · reviews (2-3 real customer quotes with names) · hours + address + phone · footer
 Hero headline: 4-7 words capturing this specific shop's personality. NOT "Welcome to [name]". NOT a generic tagline.
@@ -295,11 +312,20 @@ Deno.serve(async (req) => {
       await new Promise(res => setTimeout(res, 150));
     }
 
-    // Deduplicate and save
+    // Save new businesses; refresh data on existing ones (re-searches get fresh leads)
     const savedBusinesses: Record<string, unknown>[] = [];
     for (const biz of queue) {
-      const existing = await db.Business.filter({ google_place_id: biz.google_place_id as string });
-      if (existing?.length > 0) continue;
+      const existing = await db.Business.filter({ google_place_id: biz.google_place_id as string }) as Record<string, unknown>[];
+      if (existing?.length > 0) {
+        // Update mutable fields so re-scrapes pick up rating/hours/review changes
+        // Only re-process if the business has no site yet
+        await db.Business.update(existing[0].id as string, {
+          rating: biz.rating, review_count: biz.review_count,
+          top_reviews: biz.top_reviews, hours: biz.hours, phone: biz.phone,
+        });
+        if (!existing[0].personality_profile) savedBusinesses.push(existing[0]);
+        continue;
+      }
       const created = await db.Business.create(biz);
       savedBusinesses.push(created);
     }

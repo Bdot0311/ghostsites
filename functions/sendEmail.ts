@@ -12,13 +12,17 @@ Deno.serve(async (req) => {
     const gmailTok = gmail_token || Deno.env.get('GMAIL_ACCESS_TOKEN');
     if (!gmailTok) return Response.json({ error: 'Gmail token required' }, { status: 400 });
 
-    const raw = btoa([
+    const mime = [
       `To: ${to_email}`,
       `Subject: ${campaign.subject}`,
+      'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
+      'Content-Transfer-Encoding: base64',
       '',
-      campaign.body as string
-    ].join('\r\n')).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+      btoa(unescape(encodeURIComponent(campaign.body as string))),
+    ].join('\r\n');
+    // base64url encode the full MIME message (handles non-ASCII like em dashes)
+    const raw = btoa(unescape(encodeURIComponent(mime))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 
     const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method:'POST',

@@ -75,11 +75,14 @@ export default function Dashboard() {
       const res = await callFn("getData", {});
       if (res?.error) { console.error("loadData error:", res.error); return; }
       setBusinesses(res.businesses || []);
+      // Sort newest-first so the latest site/campaign wins when multiple exist per business
       const siteMap = {};
-      (res.sites || []).forEach(s => { siteMap[s.business_id] = s; });
+      [...(res.sites || [])].sort((a, b) => (a.generated_at || "") < (b.generated_at || "") ? -1 : 1)
+        .forEach(s => { siteMap[s.business_id] = s; });
       setSites(siteMap);
       const ecMap = {};
-      (res.emailCampaigns || []).forEach(e => { ecMap[e.business_id] = e; });
+      [...(res.emailCampaigns || [])].sort((a, b) => (a.created_at || "") < (b.created_at || "") ? -1 : 1)
+        .forEach(e => { ecMap[e.business_id] = e; });
       setEmailCampaigns(ecMap);
     } catch (e) {
       console.error("loadData error:", e);
@@ -114,21 +117,11 @@ export default function Dashboard() {
     setRunning(true);
     const log = (msg) => setRunLog(prev => [...prev, msg]);
     try {
-      log(`🧠 Analyzing...`);
-      const analyzeRes = await callFn("analyzePersonality", { business_id: business.id });
-      if (analyzeRes?.error) throw new Error(analyzeRes.error);
-      log(`✅ ${analyzeRes?.profile?.design_archetype}`);
-
-      log(`🎨 Generating site...`);
-      const siteRes = await callFn("generateSite", { business_id: business.id });
-      if (siteRes?.error) throw new Error(siteRes.error);
-      log(`✅ ${siteRes?.layout} · ${siteRes?.palette}`);
-
-      log(`✍️ Writing email...`);
-      const emailRes = await callFn("writeEmail", { business_id: business.id });
-      if (emailRes?.error) throw new Error(emailRes.error);
-      log(`✅ "${emailRes?.subject}"`);
-
+      log(`🧠 Analyzing + generating site + writing email...`);
+      const res = await callFn("runPipeline", { business_id: business.id });
+      if (res?.error) throw new Error(res.error);
+      log(`✅ ${res?.site?.archetype} · ${res?.site?.layout} · ${res?.site?.palette}`);
+      log(`✉️ "${res?.email?.subject}"`);
       log(`🎉 Done!`);
       await loadData();
     } catch (err) {
@@ -136,6 +129,14 @@ export default function Dashboard() {
     } finally {
       setRunning(false);
     }
+  }
+
+  function startNewSearch() {
+    setCampaignForm({ city: "", category: "" });
+    setSelected(null);
+    setRunLog([]);
+    setFilter("all");
+    setShowNewCampaign(true);
   }
 
   async function sendEmailToLead(business, emailCampaign) {
@@ -205,10 +206,16 @@ export default function Dashboard() {
             <p className="text-xs text-gray-500">Autonomous lead-gen · Claude + Google Places</p>
           </div>
         </div>
-        <button onClick={() => setShowNewCampaign(true)}
-          className="bg-lime-400 text-gray-900 px-4 py-2 rounded-lg text-sm font-bold hover:bg-lime-300 transition-colors">
-          + New Campaign
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={startNewSearch}
+            className="border border-gray-700 text-gray-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 hover:text-white transition-colors">
+            Start New Search
+          </button>
+          <button onClick={() => setShowNewCampaign(true)}
+            className="bg-lime-400 text-gray-900 px-4 py-2 rounded-lg text-sm font-bold hover:bg-lime-300 transition-colors">
+            + New Campaign
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-cols-6 border-b border-gray-800">
