@@ -26,14 +26,10 @@ export default function SitePreview() {
       if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      if (!data.html_url) throw new Error("Site has no HTML yet.");
+      if (!data.html) throw new Error("Site has no HTML yet.");
 
       setBusinessName(data.business_name || "");
-
-      // Fetch the actual HTML content from the public CDN URL — no auth required
-      const htmlRes = await fetch(data.html_url);
-      if (!htmlRes.ok) throw new Error("Could not fetch site HTML.");
-      setHtml(await htmlRes.text());
+      setHtml(data.html);
     } catch (e) {
       setError(e.message);
     } finally {

@@ -59,15 +59,14 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch the HTML content from the CDN URL when a site is selected for preview
+  // Fetch HTML via getPreview (server-side) when a site is selected — avoids CDN CORS issues
   useEffect(() => {
     if (!selected) return;
     const site = sites[selected.id];
-    if (!site?.full_html) return;
+    if (!site?.id) return;
     if (previewHtml[site.id]) return; // already cached
-    fetch(site.full_html)
-      .then(r => r.ok ? r.text() : Promise.reject(r.status))
-      .then(html => setPreviewHtml(prev => ({ ...prev, [site.id]: html })))
+    callFn("getPreview", { id: site.id })
+      .then(data => { if (data?.html) setPreviewHtml(prev => ({ ...prev, [site.id]: data.html })); })
       .catch(() => {});
   }, [selected, sites]);
 
