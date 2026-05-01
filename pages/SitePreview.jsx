@@ -23,7 +23,10 @@ export default function SitePreview() {
         `https://base44.app/api/apps/${AGENT_APP_ID}/functions/getPreview?id=${id}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }
       );
-      if (!res.ok) throw new Error(`Failed to load preview (${res.status})`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "(unreadable)");
+        throw new Error(`getPreview ${res.status}: ${body}`);
+      }
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       if (!data.html) throw new Error("Site has no HTML yet.");
