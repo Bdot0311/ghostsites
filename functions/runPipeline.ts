@@ -1,6 +1,6 @@
 import { createClientFromRequest } from "npm:@base44/sdk";
 
-const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
+const MINI_APP_URL = 'https://untitled-app-37d87fa3.base44.app';
 
 async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-haiku-4-5'): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -193,76 +193,151 @@ async function generateSite(business: any, profile: any, apiKey: string, db: any
   const palette = COLOR_PALETTES[paletteId] || COLOR_PALETTES[8];
   const typography = TYPOGRAPHY_PAIRS[typographyId] || TYPOGRAPHY_PAIRS[1];
   const reviews = (business.top_reviews || []).slice(0, 3)
-    .map((r: { text: string; author: string }) => `"${r.text.slice(0, 150)}" — ${r.author}`).join('\n');
+    .map((r: { text: string; author: string; rating: number }) =>
+      ({ text: r.text.slice(0, 200), author: r.author, rating: r.rating || 5 }));
+  const photos: string[] = (business.photos || []).slice(0, 4);
+  const hasPhotos = photos.length > 0;
 
-  const layoutDesc: Record<string, string> = {
-    FULL_BLEED_HERO:    'Full-width color block at top. Business name big. Phone number prominently below. No split columns.',
-    SPLIT_HERO:         'Hero: bold text left half, accent color block or decorative element right half. CSS grid two-column.',
-    CENTERED_HERO:      'Everything center-aligned. Name, tagline, phone centered on solid background. Bold and simple.',
-    SCROLL_FLOW:        'Single scrolling column. Each section separated by color bands or thick borders. No complex grids.',
-    MAGAZINE_GRID:      'Alternating wide/narrow column layout. Text-heavy, editorial. Asymmetric section widths.',
-    ASYMMETRIC_STACK:   'Sections stack with unequal proportions — e.g. 70% text beside a 30% accent stripe. Bold whitespace.',
-  };
+  // Derive a second accent for richer palettes
+  const accentDark = palette.accent + 'CC'; // 80% opacity version for overlays
 
-  const system = `You are a web designer building a site for a LOCAL SERVICE BUSINESS — a real neighborhood shop owned by a real person, not a tech startup or SaaS product.
+  const system = `You are a senior web designer at a top creative agency. You build LOCAL BUSINESS websites that owners proudly show off and that look worth thousands of dollars. Your output is raw HTML — no markdown, no explanation, nothing before <!DOCTYPE html>, nothing after </html>.
 
-Output ONE complete HTML file. Raw HTML only — no markdown fences, no explanation, no preamble.
+══════════════════════════════════════════
+ HARD CONSTRAINTS
+══════════════════════════════════════════
+• Output starts with <!DOCTYPE html> — literally the first characters.
+• Output ends with </html> — literally the last characters.
+• Zero <script> tags. Zero JavaScript. CSS only.
+• Exactly one <style> block inside <head>. Exactly one Google Fonts <link> inside <head>.
+• All business info must be real: real phone, real hours, real address, real verbatim review text.
+• Max 9000 tokens total.
 
-ABSOLUTE RULES:
-1. First character must be < of <!DOCTYPE html>. Last character must be > of </html>.
-2. ZERO JavaScript. No <script> tags at all. Pure HTML + CSS only.
-3. One <style> block in <head>. One Google Fonts <link> in <head>. Nothing else in <head>.
-4. Real business data only — phone number, actual hours, real street address, verbatim review quotes with real author names.
-5. Under 5000 tokens total.
+══════════════════════════════════════════
+ WHAT MAKES A $5,000 LOCAL BUSINESS SITE
+══════════════════════════════════════════
+1. HERO: Full viewport height (100vh). Business photo as CSS background-image with a dark or brand-color gradient overlay so text is always readable. The headline is HUGE (clamp(3rem, 8vw, 7rem)). Phone number is a large clickable tel: link in the hero. No plain solid-color hero — it always has a real photo or a rich layered gradient.
 
-THIS IS A LOCAL BUSINESS SITE — NOT a startup, not SaaS, not a digital agency:
-❌ NEVER use: gradients on text, glassmorphism, "Book a Demo", "Get Started Free", feature comparison grids, pricing tiers, "Trusted by 10,000+ customers", parallax, scroll animations, any language that sounds like a VC pitch deck
-✓ DO use: phone number large in the nav bar, real hours (Mon-Fri format), real street address, genuine customer name quotes, language a small business owner would actually say
+2. TYPOGRAPHY HIERARCHY that feels intentional:
+   - h1: clamp(3rem,8vw,7rem), font-weight:800 or 900, tight letter-spacing
+   - h2: clamp(1.8rem,4vw,3rem), font-weight:700
+   - h3: 1.25rem–1.5rem, font-weight:600
+   - body: 1rem–1.125rem, line-height:1.7
+   - nav phone: 1.1rem, font-weight:700, accent color
 
-COLORS:
-  background: ${palette.background}
-  text: ${palette.text}
-  accent: ${palette.accent}
-  muted: ${palette.muted}
+3. COLOR SYSTEM using CSS custom properties:
+   :root {
+     --bg: [background];
+     --text: [text];
+     --accent: [accent];
+     --accent-light: [accent]22;  /* accent at 13% opacity */
+     --muted: [muted];
+     --surface: [slightly different from bg];
+     --border: [subtle border color];
+   }
 
-FONTS:
-  headings: "${typography.heading_font}"
-  body: "${typography.body_font}"
+4. NAV: position:sticky; top:0; backdrop-filter:blur(12px); with semi-transparent background. Business name left, phone number right (large, accent color). z-index:100.
 
-LAYOUT — ${layout}:
-${layoutDesc[layout] || layoutDesc.SCROLL_FLOW}
+5. SERVICE CARDS: CSS grid, 3 columns (auto-fill, minmax(260px,1fr)). Each card has: padding 2rem, border-left:4px solid var(--accent), background:var(--surface), subtle box-shadow. Service name bold, short 1-2 line description, optional price range. Cards lift on hover (transform:translateY(-4px), box-shadow increase).
 
-SECTIONS (in order):
-1. Nav — business name + phone number (large, clickable tel: link)
-2. Hero — 4-7 word headline unique to this shop's personality. NOT "Welcome to [name]"
-3. About — written in the OWNER'S voice, mentioning the actual city/neighborhood
-4. Services — 4-6 services, written like a menu or chalkboard list (not a feature grid)
-5. Reviews — 2-3 verbatim quotes with customer names
-6. Hours + address + phone
-7. Footer — include: "Built as a free preview — not affiliated with ${business.name}"`;
+6. REVIEWS: Large decorative quotation marks (font-size:4rem, color:var(--accent), opacity:0.3). Review text in italic. Author name in accent color with weight 600. Star rating as ★★★★★ in accent color. Cards on contrasting background.
 
-  const user = `${business.name} | ${business.category} | ${business.city}${business.state ? ', ' + business.state : ''}
-Phone: ${business.phone || 'N/A'} | Hours: ${(business.hours || 'Call for hours').slice(0, 200)}
-Rating: ${business.rating}/5 (${business.review_count} reviews)
-Design vibe: ${archetype} — ${profile.tone_of_voice || ''}
-What makes them special: ${profile.key_differentiator || ''}
-Personality: ${(profile.personality_keywords || []).join(', ')}
-Avoid in copy: ${(profile.avoid || []).join(', ')}
+7. GALLERY (if photos provided): CSS grid photo gallery, object-fit:cover, aspect-ratio:4/3 or 1/1, slight border-radius. Captions optional.
 
-Customer reviews to quote verbatim:
-${reviews}
+8. CONTACT/HOURS: Two-column layout. Hours in a styled table or dl list. Address with a subtle map-pin icon (use unicode ◉ or ▶). Big prominent phone number styled as a CTA button.
 
-Google Fonts URL: https://fonts.googleapis.com/css2?family=${typography.google_fonts}&display=swap
+9. FOOTER: Dark background (or accent color), business name, quick links, "Built as a free preview — not affiliated with [name]" in small text.
 
-COPY RULES — every sentence must be specific to THIS business:
-- Hero headline: use one of the personality keywords above, reference the city or neighborhood
-- About section: mention something specific a customer praised in the reviews
-- Services: name them how this type of business would (not generic tech language)
-- One service can mention the best_review_quote naturally in context
+10. MICRO-DETAILS that signal quality:
+    - section padding: 5rem 2rem (generous breathing room)
+    - max-width:1200px centered containers
+    - Smooth transitions: transition: all 0.25s ease
+    - Border-radius on cards: 8px–12px
+    - Subtle section dividers or background alternation
+    - Accent color used as left-border on blockquotes
+    - Stars rendered as actual ★ characters in accent color
 
-Write the complete HTML file now. Start with <!DOCTYPE html>.`;
+══════════════════════════════════════════
+ WHAT TO NEVER DO
+══════════════════════════════════════════
+❌ Solid flat-color hero with no texture or image
+❌ "Book a Demo", "Get Started", "Our Features", "Pricing Plans"
+❌ Generic copy that could apply to any business ("We provide quality service")
+❌ Tiny font sizes (never below 0.875rem for body)
+❌ Default browser blue links
+❌ More than 2 font families
+❌ Tables for layout
+❌ Inline styles everywhere (use the CSS custom properties)
+❌ Placeholder text like "Lorem ipsum" or "[Business Name]"
 
-  let html = await callClaude(apiKey, system, user, 6000, 'claude-opus-4-5');
+══════════════════════════════════════════
+ DESIGN TOKENS FOR THIS SITE
+══════════════════════════════════════════
+--bg: ${palette.background}
+--text: ${palette.text}
+--accent: ${palette.accent}
+--muted: ${palette.muted}
+Heading font: "${typography.heading_font}"
+Body font: "${typography.body_font}"
+Google Fonts: https://fonts.googleapis.com/css2?family=${typography.google_fonts}&display=swap
+
+Design archetype: ${archetype}
+${archetype === 'Retro' ? 'Retro feel: use warm textures, slightly rounded corners, vintage-feeling layout asymmetry, handcrafted energy.' : ''}
+${archetype === 'Soft Luxury' ? 'Soft luxury: generous whitespace, thin elegant borders, muted tones with a single gold/copper accent, refined spacing.' : ''}
+${archetype === 'Brutalist' ? 'Brutalist: thick borders, raw typography, high contrast, bold grid breaks, unapologetic simplicity.' : ''}
+${archetype === 'Warm Local' ? 'Warm local: earthy tones, inviting copy, neighborhood pride, honest and approachable.' : ''}
+${archetype === 'Bold Minimal' ? 'Bold minimal: extreme whitespace, one or two statement typographic moments, no decoration — let the copy speak.' : ''}
+${archetype === 'Editorial' ? 'Editorial: magazine-style layout, strong typographic hierarchy, asymmetric grids, ink-and-paper feel.' : ''}
+${archetype === 'Photo-First' ? 'Photo-first: imagery leads every section, text overlays on photos, full-bleed visuals, gallery-heavy.' : ''}
+${archetype === 'Classic' ? 'Classic: timeless serif typography, clean symmetrical layout, dark navy or deep tones, professional gravitas.' : ''}
+${archetype === 'Rustic' ? 'Rustic: warm wood-toned palette, slightly rough edges, artisan feel, honest and unpretentious.' : ''}`;
+
+  const photoSection = hasPhotos ? `
+BUSINESS PHOTOS — use these as actual <img> tags and CSS background-image URLs:
+${photos.map((url, i) => `Photo ${i + 1}: ${url}`).join('\n')}
+
+Photo usage instructions:
+- Photo 1: Use as hero background-image in CSS (with overlay: background: linear-gradient(to bottom, ${accentDark} 0%, rgba(0,0,0,0.65) 100%), url("PHOTO_1_URL"); background-size:cover; background-position:center;)
+- Photo 2 (if available): Use in the About section as a float-right or grid image, max-width:400px, border-radius:8px
+- Photos 3-4 (if available): Use in a photo gallery grid section between Services and Reviews
+- All <img> tags: style="width:100%;height:100%;object-fit:cover;display:block;"
+` : `
+No photos available — use a rich layered CSS gradient for the hero background instead of a solid color. Make it visually interesting using multiple gradient stops with the palette colors.`;
+
+  const reviewsFormatted = reviews.map((r, i) =>
+    `Review ${i+1} — ${r.author} (${r.rating}/5 stars): "${r.text}"`
+  ).join('\n');
+
+  const user = `══ BUSINESS BRIEF ══
+Name: ${business.name}
+Type: ${business.category}
+Location: ${business.city}${business.state ? ', ' + business.state : ''}
+Address: ${business.address || ''}
+Phone: ${business.phone || 'Call for info'}
+Hours: ${(business.hours || 'Call for hours').slice(0, 300)}
+Google Rating: ${business.rating}/5 (${business.review_count} reviews)
+
+══ BRAND PERSONALITY ══
+Archetype: ${archetype}
+Owner voice: ${profile.tone_of_voice || ''}
+What makes them unique: ${profile.key_differentiator || ''}
+Brand keywords: ${(profile.personality_keywords || []).join(', ')}
+Avoid these words/vibes: ${(profile.avoid || []).join(', ')}
+
+══ REAL CUSTOMER REVIEWS (quote these verbatim) ══
+${reviewsFormatted || 'No reviews available — write plausible authentic-sounding content'}
+
+${photoSection}
+
+══ COPY BRIEF ══
+Hero headline: 4-8 words that capture THIS shop's soul. Avoid generic phrases. Use one of the brand keywords. Reference the city.
+About section: 3-4 sentences in the owner's voice. Mention the city/neighborhood. Reference something specific from the reviews.
+Services: Real service names this business would actually use. Include short descriptions and optional price ranges if you can infer them.
+Footer must include: "Built as a free preview — not affiliated with ${business.name}"
+
+Write the complete, production-quality HTML site now. Begin immediately with <!DOCTYPE html>.`;
+
+  let html = await callClaude(apiKey, system, user, 9000, 'claude-opus-4-5');
   html = html.replace(/^```html\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
   if (!html.startsWith('<!DOCTYPE') && !html.startsWith('<html')) {
     const docIdx = html.indexOf('<!DOCTYPE');
