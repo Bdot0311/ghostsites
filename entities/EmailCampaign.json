@@ -39,6 +39,9 @@
     },
     "send_attempts": {
       "type": "number"
+    },
+    "created_at": {
+      "type": "string"
     }
   },
   "required": [],

@@ -52,6 +52,8 @@ export default function Dashboard() {
   const [sending, setSending] = useState(false);
   const [filter, setFilter] = useState("all");
   const [previewHtml, setPreviewHtml] = useState({});  // site_id -> fetched HTML string
+  const [campaigns, setCampaigns] = useState([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
 
   useEffect(() => {
     loadData();
@@ -84,6 +86,11 @@ export default function Dashboard() {
       [...(res.emailCampaigns || [])].sort((a, b) => (a.created_at || "") < (b.created_at || "") ? -1 : 1)
         .forEach(e => { ecMap[e.business_id] = e; });
       setEmailCampaigns(ecMap);
+      // Sort campaigns newest-first (largest id = most recent in Base44)
+      const sorted = [...(res.campaigns || [])].sort((a, b) => (a.id > b.id ? -1 : 1));
+      setCampaigns(sorted);
+      // Auto-select latest campaign on first load
+      setSelectedCampaignId(prev => prev || sorted[0]?.id || null);
     } catch (e) {
       console.error("loadData error:", e);
     }
@@ -104,6 +111,8 @@ export default function Dashboard() {
       });
       if (res?.error) throw new Error(res.error);
       log(`🎉 Done — ${res.businesses_found || 0} leads found, ${res.sites_generated || 0} sites built`);
+      if (res.message) log(`ℹ️ ${res.message}`);
+      if (res.campaign_id) setSelectedCampaignId(res.campaign_id);
       await loadData();
     } catch (err) {
       log(`❌ ${err.message}`);
@@ -136,6 +145,7 @@ export default function Dashboard() {
     setSelected(null);
     setRunLog([]);
     setFilter("all");
+    setSelectedCampaignId(null);
     setShowNewCampaign(true);
   }
 
@@ -176,16 +186,21 @@ export default function Dashboard() {
     await loadData();
   }
 
-  const hotLeads = businesses.filter(b => ["replied", "converted"].includes(b.status));
+  // Scope all views to the selected campaign
+  const campaignBusinesses = selectedCampaignId
+    ? businesses.filter(b => b.campaign_id === selectedCampaignId)
+    : businesses;
+
+  const hotLeads = campaignBusinesses.filter(b => ["replied", "converted"].includes(b.status));
   const filteredBusinesses = tab === "hot"
     ? hotLeads
-    : filter === "all" ? businesses : businesses.filter(b => b.status === filter);
+    : filter === "all" ? campaignBusinesses : campaignBusinesses.filter(b => b.status === filter);
 
-  const totalSites = businesses.filter(b => ["site_generated","email_sent","opened","replied","converted"].includes(b.status)).length;
-  const totalSent = businesses.filter(b => ["email_sent","opened","replied","converted"].includes(b.status)).length;
-  const totalOpened = businesses.filter(b => ["opened","replied","converted"].includes(b.status)).length;
-  const totalReplied = businesses.filter(b => ["replied","converted"].includes(b.status)).length;
-  const totalConverted = businesses.filter(b => b.status === "converted").length;
+  const totalSites = campaignBusinesses.filter(b => ["site_generated","email_sent","opened","replied","converted"].includes(b.status)).length;
+  const totalSent = campaignBusinesses.filter(b => ["email_sent","opened","replied","converted"].includes(b.status)).length;
+  const totalOpened = campaignBusinesses.filter(b => ["opened","replied","converted"].includes(b.status)).length;
+  const totalReplied = campaignBusinesses.filter(b => ["replied","converted"].includes(b.status)).length;
+  const totalConverted = campaignBusinesses.filter(b => b.status === "converted").length;
   const openRate = totalSent ? Math.round((totalOpened / totalSent) * 100) : 0;
   const replyRate = totalSent ? Math.round((totalReplied / totalSent) * 100) : 0;
   const convRate = totalReplied ? Math.round((totalConverted / totalReplied) * 100) : 0;
@@ -207,9 +222,23 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {campaigns.length > 0 && (
+            <select
+              value={selectedCampaignId || ""}
+              onChange={e => { setSelectedCampaignId(e.target.value || null); setSelected(null); }}
+              className="bg-gray-800 border border-gray-700 text-gray-300 text-xs px-3 py-2 rounded-lg max-w-[220px] truncate"
+            >
+              <option value="">All campaigns</option>
+              {campaigns.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.query} ({c.businesses_found || 0} leads)
+                </option>
+              ))}
+            </select>
+          )}
           <button onClick={startNewSearch}
             className="border border-gray-700 text-gray-400 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 hover:text-white transition-colors">
-            Start New Search
+            New Search
           </button>
           <button onClick={() => setShowNewCampaign(true)}
             className="bg-lime-400 text-gray-900 px-4 py-2 rounded-lg text-sm font-bold hover:bg-lime-300 transition-colors">
