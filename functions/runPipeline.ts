@@ -147,6 +147,25 @@ JSON: {"personality_keywords":["a","b","c","d","e"],"design_archetype":"Retro","
   return profile;
 }
 
+// Fetch a photo URL server-side and return as a base64 data URI so it
+// displays in any iframe without CORS / redirect / API key issues.
+async function photoToDataUri(url: string): Promise<string | null> {
+  try {
+    const smallUrl = url.replace(/maxWidthPx=\d+/, 'maxWidthPx=600');
+    const resp = await fetch(smallUrl, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const buf = await resp.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    const ct = resp.headers.get('content-type') || 'image/jpeg';
+    return `data:${ct};base64,${btoa(bin)}`;
+  } catch (_) { return null; }
+}
+
 // deno-lint-ignore no-explicit-any
 async function generateSite(business: any, profile: any, apiKey: string, db: any) {
   const existingSites = await db.GeneratedSite.list();
@@ -192,150 +211,324 @@ async function generateSite(business: any, profile: any, apiKey: string, db: any
 
   const palette = COLOR_PALETTES[paletteId] || COLOR_PALETTES[8];
   const typography = TYPOGRAPHY_PAIRS[typographyId] || TYPOGRAPHY_PAIRS[1];
-  const reviews = (business.top_reviews || []).slice(0, 3)
-    .map((r: { text: string; author: string; rating: number }) =>
-      ({ text: r.text.slice(0, 200), author: r.author, rating: r.rating || 5 }));
-  const photos: string[] = (business.photos || []).slice(0, 4);
-  const hasPhotos = photos.length > 0;
 
-  // Derive a second accent for richer palettes
-  const accentDark = palette.accent + 'CC'; // 80% opacity version for overlays
+  const rawReviews = (business.top_reviews || []).slice(0, 3) as { text: string; author: string; rating: number }[];
+  const reviews = rawReviews.map(r => ({ text: r.text.slice(0, 220), author: r.author, rating: r.rating || 5 }));
+  const rawPhotos: string[] = (business.photos || []).slice(0, 4);
 
-  const system = `You are a senior web designer at a top creative agency. You build LOCAL BUSINESS websites that owners proudly show off and that look worth thousands of dollars. Your output is raw HTML — no markdown, no explanation, nothing before <!DOCTYPE html>, nothing after </html>.
+  // Fetch photos server-side → embed as base64 data URIs so they always
+  // display inside an iframe without CORS, redirect, or API-key issues.
+  const photoDataUris: string[] = [];
+  for (const url of rawPhotos) {
+    const uri = await photoToDataUri(url);
+    if (uri) photoDataUris.push(uri);
+  }
 
-══════════════════════════════════════════
- HARD CONSTRAINTS
-══════════════════════════════════════════
-• Output starts with <!DOCTYPE html> — literally the first characters.
-• Output ends with </html> — literally the last characters.
-• Zero <script> tags. Zero JavaScript. CSS only.
-• Exactly one <style> block inside <head>. Exactly one Google Fonts <link> inside <head>.
-• All business info must be real: real phone, real hours, real address, real verbatim review text.
-• Max 9000 tokens total.
+  // Build hero background CSS — real photo overlay if available, otherwise rich gradient
+  const heroPhotoCss = photoDataUris.length > 0
+    ? `background: linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.72) 100%), url("${photoDataUris[0]}") center/cover no-repeat fixed;`
+    : `background: linear-gradient(135deg, ${palette.accent} 0%, ${palette.background} 60%, ${palette.muted} 100%);`;
 
-══════════════════════════════════════════
- WHAT MAKES A $5,000 LOCAL BUSINESS SITE
-══════════════════════════════════════════
-1. HERO: Full viewport height (100vh). Business photo as CSS background-image with a dark or brand-color gradient overlay so text is always readable. The headline is HUGE (clamp(3rem, 8vw, 7rem)). Phone number is a large clickable tel: link in the hero. No plain solid-color hero — it always has a real photo or a rich layered gradient.
+  const aboutPhotoCss = photoDataUris.length > 1
+    ? `<img src="${photoDataUris[1]}" alt="${business.name}" style="width:100%;height:380px;object-fit:cover;border-radius:12px;display:block;">`
+    : '';
 
-2. TYPOGRAPHY HIERARCHY that feels intentional:
-   - h1: clamp(3rem,8vw,7rem), font-weight:800 or 900, tight letter-spacing
-   - h2: clamp(1.8rem,4vw,3rem), font-weight:700
-   - h3: 1.25rem–1.5rem, font-weight:600
-   - body: 1rem–1.125rem, line-height:1.7
-   - nav phone: 1.1rem, font-weight:700, accent color
+  const galleryHtml = photoDataUris.length > 2
+    ? `<section class="gallery"><div class="container"><h2>Our Work</h2><div class="gallery-grid">${
+        photoDataUris.slice(2).map(uri =>
+          `<div class="gallery-item"><img src="${uri}" alt="${business.name}" style="width:100%;height:260px;object-fit:cover;border-radius:8px;display:block;"></div>`
+        ).join('')
+      }</div></div></section>`
+    : '';
 
-3. COLOR SYSTEM using CSS custom properties:
-   :root {
-     --bg: [background];
-     --text: [text];
-     --accent: [accent];
-     --accent-light: [accent]22;  /* accent at 13% opacity */
-     --muted: [muted];
-     --surface: [slightly different from bg];
-     --border: [subtle border color];
-   }
+  const starsHtml = (n: number) => '★'.repeat(Math.min(5, Math.max(1, Math.round(n))));
 
-4. NAV: position:sticky; top:0; backdrop-filter:blur(12px); with semi-transparent background. Business name left, phone number right (large, accent color). z-index:100.
+  const reviewCards = reviews.map(r => `
+    <div class="review-card">
+      <div class="review-stars">${starsHtml(r.rating)}</div>
+      <blockquote>"${r.text}"</blockquote>
+      <cite>— ${r.author}</cite>
+    </div>`).join('');
 
-5. SERVICE CARDS: CSS grid, 3 columns (auto-fill, minmax(260px,1fr)). Each card has: padding 2rem, border-left:4px solid var(--accent), background:var(--surface), subtle box-shadow. Service name bold, short 1-2 line description, optional price range. Cards lift on hover (transform:translateY(-4px), box-shadow increase).
+  const servicesList = `<!-- Claude: replace with 5-6 real services for this ${business.category} -->`;
 
-6. REVIEWS: Large decorative quotation marks (font-size:4rem, color:var(--accent), opacity:0.3). Review text in italic. Author name in accent color with weight 600. Star rating as ★★★★★ in accent color. Cards on contrasting background.
+  // Archetype personality hint fed into copy prompt only (keeps system prompt shorter)
+  const archetypeHint: Record<string, string> = {
+    'Retro':       'vintage charm, handcrafted energy, warm nostalgia',
+    'Soft Luxury': 'refined elegance, effortless quality, understated prestige',
+    'Brutalist':   'raw confidence, no-nonsense attitude, bold directness',
+    'Warm Local':  'neighborhood pride, genuine warmth, community roots',
+    'Bold Minimal':'striking simplicity, confident restraint, modern clarity',
+    'Editorial':   'cultured taste, editorial flair, ink-and-paper sophistication',
+    'Photo-First': 'visual storytelling, imagery-led, show-don\'t-tell',
+    'Classic':     'timeless professionalism, trusted authority, dignified craft',
+    'Rustic':      'artisan soul, honest craft, earthy authenticity',
+  };
+  const vibe = archetypeHint[archetype] || 'authentic local character';
 
-7. GALLERY (if photos provided): CSS grid photo gallery, object-fit:cover, aspect-ratio:4/3 or 1/1, slight border-radius. Captions optional.
+  const system = `You are a world-class web designer. Your output is a single complete HTML file for a LOCAL SERVICE BUSINESS — the kind of site a boutique agency would charge $5,000–$10,000 to build.
 
-8. CONTACT/HOURS: Two-column layout. Hours in a styled table or dl list. Address with a subtle map-pin icon (use unicode ◉ or ▶). Big prominent phone number styled as a CTA button.
+OUTPUT RULES (non-negotiable):
+• Start with exactly: <!DOCTYPE html>
+• End with exactly: </html>
+• No markdown fences, no explanation, nothing outside the HTML.
+• Zero <script> tags. Pure HTML + CSS only.
+• One <style> block in <head>. One Google Fonts <link> in <head>.
+• Use ONLY the real business data provided. No placeholder text ever.
 
-9. FOOTER: Dark background (or accent color), business name, quick links, "Built as a free preview — not affiliated with [name]" in small text.
+FILL IN THIS EXACT SKELETON — expand and enrich every section, do not simplify:
 
-10. MICRO-DETAILS that signal quality:
-    - section padding: 5rem 2rem (generous breathing room)
-    - max-width:1200px centered containers
-    - Smooth transitions: transition: all 0.25s ease
-    - Border-radius on cards: 8px–12px
-    - Subtle section dividers or background alternation
-    - Accent color used as left-border on blockquotes
-    - Stars rendered as actual ★ characters in accent color
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BUSINESS_NAME | CITY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="GOOGLE_FONTS_URL" rel="stylesheet">
+  <style>
+    :root {
+      --bg: BG_COLOR;
+      --text: TEXT_COLOR;
+      --accent: ACCENT_COLOR;
+      --muted: MUTED_COLOR;
+      --surface: SURFACE_COLOR; /* slightly lighter/darker than --bg */
+      --border: rgba(0,0,0,0.08);
+      --radius: 10px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.10);
+      --shadow-lg: 0 12px 48px rgba(0,0,0,0.18);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { font-family: BODY_FONT, sans-serif; background: var(--bg); color: var(--text); line-height: 1.75; font-size: 1.0625rem; }
+    a { color: inherit; text-decoration: none; }
+    img { display: block; max-width: 100%; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
+    section { padding: 6rem 0; }
 
-══════════════════════════════════════════
- WHAT TO NEVER DO
-══════════════════════════════════════════
-❌ Solid flat-color hero with no texture or image
-❌ "Book a Demo", "Get Started", "Our Features", "Pricing Plans"
-❌ Generic copy that could apply to any business ("We provide quality service")
-❌ Tiny font sizes (never below 0.875rem for body)
-❌ Default browser blue links
-❌ More than 2 font families
-❌ Tables for layout
-❌ Inline styles everywhere (use the CSS custom properties)
-❌ Placeholder text like "Lorem ipsum" or "[Business Name]"
+    /* NAV */
+    nav { position: sticky; top: 0; z-index: 100; background: rgba(BG_RGB, 0.93); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-bottom: 1px solid var(--border); padding: 1.1rem 2rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .nav-brand { font-family: HEADING_FONT, serif; font-size: 1.25rem; font-weight: 700; color: var(--text); }
+    .nav-phone { font-size: 1.1rem; font-weight: 700; color: var(--accent); letter-spacing: -0.01em; }
+    .nav-phone:hover { opacity: 0.8; }
 
-══════════════════════════════════════════
- DESIGN TOKENS FOR THIS SITE
-══════════════════════════════════════════
+    /* HERO */
+    .hero { min-height: 100vh; HERO_BACKGROUND display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 5rem; }
+    .hero-inner { max-width: 1200px; margin: 0 auto; padding: 0 2rem; width: 100%; }
+    .hero h1 { font-family: HEADING_FONT, serif; font-size: clamp(3rem, 8vw, 7rem); font-weight: 900; line-height: 1.0; letter-spacing: -0.03em; color: #fff; margin-bottom: 1.5rem; max-width: 14ch; text-shadow: 0 2px 20px rgba(0,0,0,0.4); }
+    .hero-sub { font-size: clamp(1.1rem, 2vw, 1.35rem); color: rgba(255,255,255,0.88); margin-bottom: 2.5rem; max-width: 52ch; line-height: 1.5; }
+    .hero-cta { display: inline-flex; align-items: center; gap: 0.6rem; background: var(--accent); color: #fff; font-size: 1.2rem; font-weight: 700; padding: 1rem 2.2rem; border-radius: 50px; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .hero-cta:hover { transform: translateY(-3px); box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+    .hero-badge { display: inline-flex; align-items: center; gap: 0.4rem; background: rgba(255,255,255,0.15); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.25); color: #fff; font-size: 0.9rem; font-weight: 600; padding: 0.5rem 1rem; border-radius: 50px; margin-bottom: 1.5rem; }
+
+    /* ABOUT */
+    .about { background: var(--surface); }
+    .about-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center; }
+    .about-grid.no-photo { grid-template-columns: 1fr; max-width: 720px; }
+    .about h2 { font-family: HEADING_FONT, serif; font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; line-height: 1.15; margin-bottom: 1.5rem; }
+    .about p { color: var(--muted); margin-bottom: 1rem; font-size: 1.0625rem; }
+    .about-stat { display: flex; gap: 3rem; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border); }
+    .stat-num { font-family: HEADING_FONT, serif; font-size: 2.5rem; font-weight: 900; color: var(--accent); line-height: 1; }
+    .stat-label { font-size: 0.875rem; color: var(--muted); margin-top: 0.3rem; }
+
+    /* SERVICES */
+    .services h2 { font-family: HEADING_FONT, serif; font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; margin-bottom: 0.75rem; }
+    .services-intro { color: var(--muted); margin-bottom: 3rem; max-width: 56ch; font-size: 1.0625rem; }
+    .services-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; }
+    .service-card { background: var(--surface); border-radius: var(--radius); padding: 2rem; border-left: 4px solid var(--accent); box-shadow: var(--shadow); transition: transform 0.25s, box-shadow 0.25s; }
+    .service-card:hover { transform: translateY(-5px); box-shadow: var(--shadow-lg); }
+    .service-icon { font-size: 2rem; margin-bottom: 1rem; }
+    .service-name { font-family: HEADING_FONT, serif; font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text); }
+    .service-desc { color: var(--muted); font-size: 0.9375rem; line-height: 1.6; }
+    .service-price { margin-top: 1rem; font-weight: 700; color: var(--accent); font-size: 0.9rem; }
+
+    /* GALLERY (if photos) */
+    .gallery { background: var(--surface); }
+    .gallery h2 { font-family: HEADING_FONT, serif; font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; margin-bottom: 2.5rem; }
+    .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+    .gallery-item { overflow: hidden; border-radius: var(--radius); }
+    .gallery-item img { transition: transform 0.4s ease; }
+    .gallery-item:hover img { transform: scale(1.04); }
+
+    /* REVIEWS */
+    .reviews { background: var(--text); }
+    .reviews h2 { font-family: HEADING_FONT, serif; font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; margin-bottom: 0.5rem; color: #fff; }
+    .reviews-sub { color: rgba(255,255,255,0.55); margin-bottom: 3rem; }
+    .reviews-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
+    .review-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--radius); padding: 2rem; transition: background 0.2s; }
+    .review-card:hover { background: rgba(255,255,255,0.1); }
+    .review-stars { color: var(--accent); font-size: 1.1rem; letter-spacing: 0.05em; margin-bottom: 1rem; }
+    .review-card blockquote { color: rgba(255,255,255,0.85); font-style: italic; line-height: 1.7; font-size: 1rem; margin-bottom: 1.2rem; position: relative; }
+    .review-card blockquote::before { content: '\\201C'; font-size: 4rem; color: var(--accent); opacity: 0.3; position: absolute; top: -1.5rem; left: -0.5rem; font-family: Georgia, serif; line-height: 1; }
+    .review-card cite { color: var(--accent); font-weight: 600; font-style: normal; font-size: 0.9rem; }
+
+    /* CONTACT / HOURS */
+    .contact h2 { font-family: HEADING_FONT, serif; font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; margin-bottom: 3rem; }
+    .contact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: start; }
+    .hours-list { list-style: none; }
+    .hours-list li { display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid var(--border); font-size: 0.9375rem; }
+    .hours-list li span:first-child { color: var(--muted); }
+    .hours-list li span:last-child { font-weight: 600; }
+    .contact-detail { display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 1.25rem; font-size: 1rem; color: var(--muted); }
+    .contact-detail strong { color: var(--text); display: block; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.2rem; }
+    .cta-phone { display: inline-flex; align-items: center; gap: 0.6rem; background: var(--accent); color: #fff; font-size: 1.3rem; font-weight: 800; padding: 1.1rem 2.5rem; border-radius: 50px; margin-top: 2rem; transition: transform 0.2s, box-shadow 0.2s; box-shadow: var(--shadow); }
+    .cta-phone:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+
+    /* FOOTER */
+    footer { background: #111; color: rgba(255,255,255,0.5); padding: 3rem 2rem; }
+    .footer-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 2rem; flex-wrap: wrap; }
+    .footer-brand { font-family: HEADING_FONT, serif; font-size: 1.2rem; font-weight: 700; color: #fff; }
+    .footer-note { font-size: 0.78rem; color: rgba(255,255,255,0.3); }
+
+    @media (max-width: 768px) {
+      .about-grid, .contact-grid { grid-template-columns: 1fr; }
+      .hero h1 { font-size: clamp(2.5rem, 10vw, 4rem); }
+      section { padding: 4rem 0; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-brand">BUSINESS_NAME</span>
+  <a href="tel:PHONE" class="nav-phone">📞 PHONE</a>
+</nav>
+
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-badge">⭐ RATING/5 · REVIEW_COUNT Reviews on Google</div>
+    <h1>UNIQUE_4_TO_8_WORD_HEADLINE</h1>
+    <p class="hero-sub">OWNER_VOICE_TAGLINE_ONE_SENTENCE</p>
+    <a href="tel:PHONE" class="hero-cta">📞 Call PHONE</a>
+  </div>
+</section>
+
+<section class="about">
+  <div class="container">
+    <div class="about-grid ABOUT_PHOTO_CLASS">
+      <div>
+        <h2>ABOUT_HEADING</h2>
+        <p>ABOUT_PARAGRAPH_1 (owner voice, mention city/neighborhood)</p>
+        <p>ABOUT_PARAGRAPH_2 (reference something specific from reviews)</p>
+        <div class="about-stat">
+          <div><div class="stat-num">STAT_1_NUM</div><div class="stat-label">STAT_1_LABEL</div></div>
+          <div><div class="stat-num">STAT_2_NUM</div><div class="stat-label">STAT_2_LABEL</div></div>
+          <div><div class="stat-num">STAT_3_NUM</div><div class="stat-label">STAT_3_LABEL</div></div>
+        </div>
+      </div>
+      ABOUT_PHOTO_OR_EMPTY
+    </div>
+  </div>
+</section>
+
+<section class="services">
+  <div class="container">
+    <h2>What We Do</h2>
+    <p class="services-intro">SERVICES_INTRO_SENTENCE</p>
+    <div class="services-grid">
+      <!-- 5-6 service cards using .service-card structure, real service names and descriptions, emoji icon, optional price -->
+      SERVICE_CARDS_HERE
+    </div>
+  </div>
+</section>
+
+GALLERY_SECTION_HERE
+
+<section class="reviews">
+  <div class="container">
+    <h2>What Clients Say</h2>
+    <p class="reviews-sub">Real words from real customers</p>
+    <div class="reviews-grid">
+      REVIEW_CARDS_HERE
+    </div>
+  </div>
+</section>
+
+<section class="contact">
+  <div class="container">
+    <h2>Find Us</h2>
+    <div class="contact-grid">
+      <div>
+        <ul class="hours-list">
+          HOURS_LIST_HERE
+        </ul>
+      </div>
+      <div>
+        <div class="contact-detail"><div><strong>Address</strong>ADDRESS_HERE</div></div>
+        <div class="contact-detail"><div><strong>Phone</strong>PHONE_HERE</div></div>
+        <a href="tel:PHONE" class="cta-phone">Call Now →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <span class="footer-brand">BUSINESS_NAME</span>
+    <span class="footer-note">Built as a free preview — not affiliated with BUSINESS_NAME</span>
+  </div>
+</footer>
+
+</body>
+</html>
+
+INSTRUCTIONS FOR FILLING THE SKELETON:
+1. Replace every UPPERCASE_PLACEHOLDER with real content from the business brief below.
+2. BG_RGB must be the rgb() version of --bg for the nav background (e.g. if --bg is #F8F1E3 use "248,241,227").
+3. HERO_BACKGROUND: use the provided hero CSS exactly as given — do NOT change it to a solid color.
+4. HEADING_FONT and BODY_FONT: use the exact font names provided.
+5. GOOGLE_FONTS_URL: use the exact URL provided.
+6. SERVICE_CARDS_HERE: write 5-6 complete .service-card divs with real service names, emoji icons, descriptions, prices.
+7. REVIEW_CARDS_HERE: use the review cards provided verbatim.
+8. HOURS_LIST_HERE: format as <li><span>Day</span><span>Hours</span></li> for each day.
+9. GALLERY_SECTION_HERE: insert the gallery HTML if provided, otherwise delete this line.
+10. ABOUT_PHOTO_OR_EMPTY: insert the about photo img tag if provided, otherwise remove the second grid column.
+11. ABOUT_PHOTO_CLASS: use "" if photo provided, "no-photo" if not.
+12. Stats: use real numbers — years in business, review count, rating etc. Make them feel earned.`;
+
+  const user = `BUSINESS: ${business.name}
+CATEGORY: ${business.category}
+CITY: ${business.city}${business.state ? ', ' + business.state : ''}
+ADDRESS: ${business.address || 'See Google Maps'}
+PHONE: ${business.phone || 'Call for info'}
+HOURS: ${(business.hours || 'Call for hours').slice(0, 400)}
+RATING: ${business.rating} / 5
+REVIEW COUNT: ${business.review_count}
+
+BRAND VIBE: ${archetype} — ${vibe}
+OWNER VOICE: ${profile.tone_of_voice || ''}
+UNIQUE VALUE: ${profile.key_differentiator || ''}
+PERSONALITY KEYWORDS: ${(profile.personality_keywords || []).join(', ')}
+AVOID: ${(profile.avoid || []).join(', ')}
+
+CUSTOMER REVIEWS (embed verbatim):
+${reviews.map((r, i) => `[${i + 1}] ${r.author} — ${r.rating}/5 stars: "${r.text}"`).join('\n') || 'No reviews — write 2 plausible ones in a genuine voice'}
+
+PRE-BUILT REVIEW CARDS (paste these into REVIEW_CARDS_HERE unchanged):
+${reviewCards || '<div class="review-card"><div class="review-stars">★★★★★</div><blockquote>Incredible service, highly recommend.</blockquote><cite>— Happy Customer</cite></div>'}
+
+HERO BACKGROUND CSS (paste into .hero rule exactly — do NOT use a flat color):
+${heroPhotoCss}
+
+ABOUT SECTION PHOTO (paste into ABOUT_PHOTO_OR_EMPTY or remove if empty):
+${aboutPhotoCss || '(no photo — use no-photo class, single column)'}
+
+GALLERY SECTION (paste into GALLERY_SECTION_HERE or remove if empty):
+${galleryHtml || '(no gallery photos — remove the GALLERY_SECTION_HERE line)'}
+
+DESIGN TOKENS:
 --bg: ${palette.background}
 --text: ${palette.text}
 --accent: ${palette.accent}
 --muted: ${palette.muted}
-Heading font: "${typography.heading_font}"
-Body font: "${typography.body_font}"
-Google Fonts: https://fonts.googleapis.com/css2?family=${typography.google_fonts}&display=swap
+--surface: ${palette.background === '#FFFFFF' ? '#F5F5F5' : palette.background + 'EE'}
+BG_RGB (for nav): convert ${palette.background} to r,g,b format
+GOOGLE_FONTS_URL: https://fonts.googleapis.com/css2?family=${typography.google_fonts}&display=swap
+HEADING_FONT: ${typography.heading_font}
+BODY_FONT: ${typography.body_font}
 
-Design archetype: ${archetype}
-${archetype === 'Retro' ? 'Retro feel: use warm textures, slightly rounded corners, vintage-feeling layout asymmetry, handcrafted energy.' : ''}
-${archetype === 'Soft Luxury' ? 'Soft luxury: generous whitespace, thin elegant borders, muted tones with a single gold/copper accent, refined spacing.' : ''}
-${archetype === 'Brutalist' ? 'Brutalist: thick borders, raw typography, high contrast, bold grid breaks, unapologetic simplicity.' : ''}
-${archetype === 'Warm Local' ? 'Warm local: earthy tones, inviting copy, neighborhood pride, honest and approachable.' : ''}
-${archetype === 'Bold Minimal' ? 'Bold minimal: extreme whitespace, one or two statement typographic moments, no decoration — let the copy speak.' : ''}
-${archetype === 'Editorial' ? 'Editorial: magazine-style layout, strong typographic hierarchy, asymmetric grids, ink-and-paper feel.' : ''}
-${archetype === 'Photo-First' ? 'Photo-first: imagery leads every section, text overlays on photos, full-bleed visuals, gallery-heavy.' : ''}
-${archetype === 'Classic' ? 'Classic: timeless serif typography, clean symmetrical layout, dark navy or deep tones, professional gravitas.' : ''}
-${archetype === 'Rustic' ? 'Rustic: warm wood-toned palette, slightly rough edges, artisan feel, honest and unpretentious.' : ''}`;
-
-  const photoSection = hasPhotos ? `
-BUSINESS PHOTOS — use these as actual <img> tags and CSS background-image URLs:
-${photos.map((url, i) => `Photo ${i + 1}: ${url}`).join('\n')}
-
-Photo usage instructions:
-- Photo 1: Use as hero background-image in CSS (with overlay: background: linear-gradient(to bottom, ${accentDark} 0%, rgba(0,0,0,0.65) 100%), url("PHOTO_1_URL"); background-size:cover; background-position:center;)
-- Photo 2 (if available): Use in the About section as a float-right or grid image, max-width:400px, border-radius:8px
-- Photos 3-4 (if available): Use in a photo gallery grid section between Services and Reviews
-- All <img> tags: style="width:100%;height:100%;object-fit:cover;display:block;"
-` : `
-No photos available — use a rich layered CSS gradient for the hero background instead of a solid color. Make it visually interesting using multiple gradient stops with the palette colors.`;
-
-  const reviewsFormatted = reviews.map((r, i) =>
-    `Review ${i+1} — ${r.author} (${r.rating}/5 stars): "${r.text}"`
-  ).join('\n');
-
-  const user = `══ BUSINESS BRIEF ══
-Name: ${business.name}
-Type: ${business.category}
-Location: ${business.city}${business.state ? ', ' + business.state : ''}
-Address: ${business.address || ''}
-Phone: ${business.phone || 'Call for info'}
-Hours: ${(business.hours || 'Call for hours').slice(0, 300)}
-Google Rating: ${business.rating}/5 (${business.review_count} reviews)
-
-══ BRAND PERSONALITY ══
-Archetype: ${archetype}
-Owner voice: ${profile.tone_of_voice || ''}
-What makes them unique: ${profile.key_differentiator || ''}
-Brand keywords: ${(profile.personality_keywords || []).join(', ')}
-Avoid these words/vibes: ${(profile.avoid || []).join(', ')}
-
-══ REAL CUSTOMER REVIEWS (quote these verbatim) ══
-${reviewsFormatted || 'No reviews available — write plausible authentic-sounding content'}
-
-${photoSection}
-
-══ COPY BRIEF ══
-Hero headline: 4-8 words that capture THIS shop's soul. Avoid generic phrases. Use one of the brand keywords. Reference the city.
-About section: 3-4 sentences in the owner's voice. Mention the city/neighborhood. Reference something specific from the reviews.
-Services: Real service names this business would actually use. Include short descriptions and optional price ranges if you can infer them.
-Footer must include: "Built as a free preview — not affiliated with ${business.name}"
-
-Write the complete, production-quality HTML site now. Begin immediately with <!DOCTYPE html>.`;
+OUTPUT THE COMPLETE HTML FILE NOW. Start immediately with <!DOCTYPE html>.`;
 
   let html = await callClaude(apiKey, system, user, 9000, 'claude-opus-4-5');
   html = html.replace(/^```html\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
