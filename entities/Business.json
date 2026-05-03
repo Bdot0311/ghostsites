@@ -1,91 +1,41 @@
 {
   "type": "object",
   "properties": {
-    "name": {
-      "type": "string"
-    },
-    "category": {
-      "type": "string"
-    },
-    "address": {
-      "type": "string"
-    },
-    "city": {
-      "type": "string"
-    },
-    "state": {
-      "type": "string"
-    },
-    "phone": {
-      "type": "string"
-    },
-    "email": {
-      "type": "string"
-    },
-    "google_place_id": {
-      "type": "string"
-    },
-    "rating": {
-      "type": "number"
-    },
-    "review_count": {
-      "type": "number"
-    },
+    "name": { "type": "string" },
+    "category": { "type": "string" },
+    "address": { "type": "string" },
+    "city": { "type": "string" },
+    "state": { "type": "string" },
+    "phone": { "type": "string" },
+    "email": { "type": "string" },
+    "google_place_id": { "type": "string" },
+    "current_website_url": { "type": "string" },
+    "website_quality": { "type": "string", "enum": ["none", "low_quality", "decent"] },
+    "rating": { "type": "number" },
+    "review_count": { "type": "number" },
     "top_reviews": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "author": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string"
-          },
-          "rating": {
-            "type": "number"
-          }
+          "author": { "type": "string" },
+          "text": { "type": "string" },
+          "rating": { "type": "number" }
         }
       }
     },
-    "photos": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "hours": {
-      "type": "string"
-    },
-    "owner_name": {
-      "type": "string"
-    },
-    "year_established": {
-      "type": "string"
-    },
-    "personality_profile": {
-      "type": "object"
-    },
+    "photos": { "type": "array", "items": { "type": "string" } },
+    "hours": { "type": "string" },
+    "owner_name": { "type": "string" },
+    "year_established": { "type": "string" },
+    "personality_profile": { "type": "object" },
     "status": {
       "type": "string",
-      "enum": [
-        "scraped",
-        "site_generated",
-        "email_sent",
-        "opened",
-        "replied",
-        "converted"
-      ]
+      "enum": ["scraped", "site_generated", "email_sent", "opened", "replied", "converted"]
     },
-    "campaign_id": {
-      "type": "string"
-    },
-    "campaign_query": {
-      "type": "string"
-    },
-    "unsubscribed": {
-      "type": "boolean"
-    }
+    "campaign_id": { "type": "string" },
+    "campaign_query": { "type": "string" },
+    "unsubscribed": { "type": "boolean" }
   },
   "required": [],
   "name": "Business"
