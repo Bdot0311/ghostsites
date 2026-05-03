@@ -22,16 +22,21 @@ function parseJSON(text: string) {
   throw new Error('No valid JSON in Claude response');
 }
 
-// Follow the Google Places photo redirect server-side to get the public
-// lh3.googleusercontent.com CDN URL — works in any browser without an API key.
+// Follow the Google Places photo redirect server-side to get the public CDN URL.
+// Uses HEAD to avoid downloading the image body (faster, avoids timeouts on 4 photos).
 async function resolvePhotoUrl(placesUrl: string): Promise<string | null> {
+  const isCdn = (u: string) =>
+    u.includes('googleusercontent') || u.includes('gstatic') || u.includes('ggpht');
   try {
     const url = placesUrl.replace(/maxWidthPx=\d+/, 'maxWidthPx=900');
-    const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(7000) });
-    if (!resp.ok) return null;
-    // After redirect, resp.url is the public CDN URL with no API key required
-    const cdn = resp.url;
-    return cdn.includes('googleusercontent') || cdn.includes('gstatic') ? cdn : null;
+    // HEAD is fast — no body download
+    const head = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    if (head.ok && isCdn(head.url)) return head.url;
+    // Some servers block HEAD; fall back to GET and cancel body immediately
+    const get = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    await get.body?.cancel();
+    if (get.ok && isCdn(get.url)) return get.url;
+    return null;
   } catch (_) { return null; }
 }
 
@@ -599,32 +604,35 @@ Return JSON:
 
 // deno-lint-ignore no-explicit-any
 async function writeEmail(business: any, profile: any, site: Record<string, unknown>, apiKey: string, db: any) {
-  const ownerName   = (business.owner_name as string) || 'there';
+  const ownerName   = (business.owner_name as string) || '';
   const hasWebsite  = !!(business.current_website_url);
-  const websiteNote = hasWebsite
-    ? `They currently have a low-quality website at ${business.current_website_url} that looks outdated and isn't helping them get customers.`
-    : `They have NO website, so people searching for "${business.category}" in ${business.city} can't find them online.`;
   const bestQuote   = (profile.best_review_quote || {}) as { text?: string; author?: string };
+
+  const greeting = ownerName ? `Hi ${ownerName}` : `Hi`;
+
+  const painInstruction = hasWebsite
+    ? `PAIN: This business HAS a website (${business.current_website_url}) but it looks cheap/outdated. Write ONE sentence about what an unprofessional-looking site is costing them — lost trust, customers clicking away, competitors getting the call instead. DO NOT say they have no website or can't be found online. They can be found — the problem is the site turns people off.`
+    : `PAIN: This business has ZERO web presence. Write ONE sentence about what being invisible online is costing them — people searching "${business.category} ${business.city}" find a competitor instead.`;
 
   const email = parseJSON(await callClaude(apiKey, 'Output JSON only: {"subject":"...","body":"..."}', `
 Write a 4-point cold outreach email from a web designer to a local business owner.
 The email must feel personal, specific, and low-pressure — not a mass blast.
 
 Business: ${business.name} (${business.category} in ${business.city})
-Owner: ${ownerName}
-Web presence: ${websiteNote}
+Greeting: ${greeting}
 Best customer review: "${bestQuote.text || ''}" — ${bestQuote.author || ''}
 Mockup URL: ${site.subdomain_url}
 
-4-point structure (80-95 words total in body — SHORT):
-1. OPENER — one specific sentence about ${business.name} that shows you actually looked them up. Reference their reviews, their specialty, their reputation in ${business.city}. NOT generic.
-2. PAIN — one sentence: what ${hasWebsite ? 'their outdated site' : 'having no web presence'} is costing them right now. Make it feel real.
-3. SOLUTION — "I put together a free mockup of what your site could look like:" then on its own line: ${site.subdomain_url}
-4. CTA — one casual sentence inviting a 15-minute call. No pressure. No exclamation marks.
+STRICT 4-point structure (80-95 words total — SHORT and punchy):
+1. OPENER — one specific sentence referencing something real about ${business.name}: their reviews, a customer quote, their reputation in ${business.city}. Show you actually looked.
+2. ${painInstruction}
+3. SOLUTION — write exactly: "I put together a free mockup of what your site could look like:" then on its own line: ${site.subdomain_url}
+4. CTA — one casual sentence: a 15-minute call, no commitment. No exclamation marks.
 
+Start the email with: "${greeting},"
 Sign off: — Alex
 
-Subject line: ≤6 words, lowercase, specific to ${business.name} — not generic`, 600, 'claude-haiku-4-5'));
+Subject line: ≤6 words, lowercase, feels written for ${business.name} specifically`, 700, 'claude-haiku-4-5'));
 
   const campaign = await db.EmailCampaign.create({
     business_id: business.id, site_id: site.site_id,
