@@ -15,12 +15,40 @@ async function callClaude(apiKey: string, system: string, user: string, maxToken
   return (await res.json()).content[0].text;
 }
 
+// callClaudeJSON: pre-fills assistant with '{' to guarantee pure JSON output from Opus.
+// The model is forced to continue from '{' so it can never prepend markdown/HTML/comments.
+async function callClaudeJSON(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-opus-4-5'): Promise<string> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model, max_tokens: maxTokens,
+      system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
+      messages: [
+        { role: 'user', content: user },
+        { role: 'assistant', content: '{' },  // pre-fill forces pure JSON
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Anthropic error: ${await res.text()}`);
+  // Response continues from '{', so prepend it back
+  return '{' + (await res.json()).content[0].text;
+}
+
 function parseJSON(text: string) {
-  const greedy = text.match(/\{[\s\S]*\}/);
+  // Strip markdown code fences
+  let t = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  // Strip leading HTML comments
+  t = t.replace(/<!--[\s\S]*?-->/g, '').trim();
+  // Try the full cleaned string first
+  try { return JSON.parse(t); } catch (_) { /* fall through */ }
+  // Greedy: first { to last }
+  const greedy = t.match(/\{[\s\S]*\}/);
   if (greedy) { try { return JSON.parse(greedy[0]); } catch (_) {} }
-  const blocks = [...text.matchAll(/\{[^{}]*\}/g)].reverse();
+  // Last-resort: smallest valid JSON objects from end to start
+  const blocks = [...t.matchAll(/\{[^{}]*\}/g)].reverse();
   for (const m of blocks) { try { return JSON.parse(m[0]); } catch (_) {} }
-  throw new Error('No valid JSON in Claude response');
+  throw new Error(`No valid JSON in Claude response. Raw: ${text.slice(0, 200)}`);
 }
 
 // Follow the Google Places photo redirect server-side to get the public CDN URL.
@@ -943,7 +971,7 @@ JSON: {"personality_keywords":["a","b","c","d","e"],"design_archetype":"Classic"
 Rating: ${business.rating || 'N/A'} (${business.review_count || 0} reviews)
 Reviews:\n${reviewsText || 'None'}`;
 
-  const profile = parseJSON(await callClaude(apiKey, system, user, 800, 'claude-opus-4-5'));
+  const profile = parseJSON(await callClaudeJSON(apiKey, system, user, 800, 'claude-opus-4-5'));
   await db.Business.update(business.id, { personality_profile: profile });
   return profile;
 }
@@ -1084,7 +1112,7 @@ async function generateSite(business: any, profile: any, apiKey: string, db: any
   const reviewSnippets = ((business.top_reviews || []) as { text: string; author: string; rating: number }[])
     .slice(0, 3).map(r => `"${r.text.slice(0, 120)}" — ${r.author}`).join(' | ');
 
-  const copyJson = await callClaude(apiKey, `Output valid JSON only. No explanation. No markdown.`, `
+  const copyJson = await callClaudeJSON(apiKey, `Output valid JSON only. No explanation. No markdown.`, `
 Write website copy for this local business. The copy must feel written BY the owner, not ABOUT them.
 
 Business: ${business.name}
@@ -1154,7 +1182,7 @@ async function writeEmail(business: any, profile: any, site: Record<string, unkn
     ? `PAIN: This business HAS a website (${business.current_website_url}) but it looks cheap/outdated. Write ONE sentence about what an unprofessional-looking site is costing them — lost trust, customers clicking away, competitors getting the call instead. Mention something SPECIFIC like "When people search '${business.category} ${business.city}' and land on your current site..."`
     : `PAIN: This business has ZERO web presence. Write ONE sentence about what being invisible online is costing them — be specific: "When someone searches '${business.category} near me' in ${business.city}, they find [competitor type] instead of you."`;
 
-  const email = parseJSON(await callClaude(apiKey, 'Output JSON only: {"subject":"...","body":"..."}', `
+  const email = parseJSON(await callClaudeJSON(apiKey, 'Output JSON only: {"subject":"...","body":"..."}', `
 Write a cold outreach email from a web designer to a local business owner.
 The email must feel like you wrote it AFTER spending 10 minutes looking at their Google listing and reviews.
 

@@ -3,12 +3,22 @@ import { createClientFromRequest } from "npm:@base44/sdk";
 async function callClaude(apiKey: string, system: string, user: string): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method:'POST', headers:{'x-api-key':apiKey,'anthropic-version':'2023-06-01','content-type':'application/json'},
-    body: JSON.stringify({ model:'claude-opus-4-5', max_tokens:500, system, messages:[{role:'user',content:user}] }),
+    body: JSON.stringify({
+      model:'claude-opus-4-5', max_tokens:700,
+      system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
+      messages:[{role:'user',content:user},{role:'assistant',content:'{'}],
+    }),
   });
   if (!res.ok) throw new Error(`Claude error: ${await res.text()}`);
-  return (await res.json()).content[0].text;
+  return '{' + (await res.json()).content[0].text;
 }
-function parseJSON(t: string) { const m = t.match(/\{[\s\S]*\}/); if (!m) throw new Error('No JSON'); return JSON.parse(m[0]); }
+function parseJSON(t: string) {
+  const clean = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  try { return JSON.parse(clean); } catch (_) {}
+  const m = clean.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch (_) {} }
+  throw new Error(`No valid JSON. Raw: ${t.slice(0, 200)}`);
+}
 
 Deno.serve(async (req) => {
   try {

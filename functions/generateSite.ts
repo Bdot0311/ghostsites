@@ -1,24 +1,28 @@
 import { createClientFromRequest } from "npm:@base44/sdk";
 import { getIndustrySections } from "./designLibrary.ts";
 
-const MINI_APP_URL = 'https://untitled-app-d324f23e.base44.app';
+const MINI_APP_URL = 'https://untitled-app-37d87fa3.base44.app';
 
 async function callClaude(apiKey: string, system: string, user: string): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 6000, system, messages: [{ role: 'user', content: user }] }),
+    body: JSON.stringify({
+      model: 'claude-opus-4-5', max_tokens: 6000,
+      system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
+      messages: [{ role: 'user', content: user }, { role: 'assistant', content: '{' }],
+    }),
   });
   if (!res.ok) throw new Error(`Claude error: ${await res.text()}`);
-  return (await res.json()).content[0].text;
+  return '{' + (await res.json()).content[0].text;
 }
 
 function parseJSON(text: string) {
-  const greedy = text.match(/\{[\s\S]*\}/);
+  const clean = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  try { return JSON.parse(clean); } catch (_) {}
+  const greedy = clean.match(/\{[\s\S]*\}/);
   if (greedy) { try { return JSON.parse(greedy[0]); } catch (_) {} }
-  const blocks = [...text.matchAll(/\{[^{}]*\}/g)].reverse();
-  for (const m of blocks) { try { return JSON.parse(m[0]); } catch (_) {} }
-  throw new Error('No valid JSON in Claude response');
+  throw new Error(`No valid JSON. Raw: ${text.slice(0, 200)}`);
 }
 
 function pick<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
