@@ -5,34 +5,52 @@ const MINI_APP_URL = 'https://untitled-app-37d87fa3.base44.app';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-opus-4-5'): Promise<string> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
-  });
-  if (!res.ok) throw new Error(`Anthropic error: ${await res.text()}`);
-  return (await res.json()).content[0].text;
+// Safe Anthropic caller: reads body as text first so HTML proxy errors never crash res.json().
+// Retries up to 2x with backoff on transient failures (rate limits, CDN error pages, etc).
+async function anthropicFetch(payload: Record<string, unknown>, apiKey: string, retries = 2): Promise<string> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
+    let res: Response;
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(90000),
+      });
+    } catch (e) {
+      if (attempt === retries) throw new Error(`Anthropic fetch failed: ${e}`);
+      continue;
+    }
+    const raw = await res.text();
+    // HTML response = proxy/CDN error page (<!-- --> or <!DOCTYPE) — retry
+    if (raw.trimStart().startsWith('<')) {
+      if (attempt === retries) throw new Error(`Anthropic returned HTML (${res.status}): ${raw.slice(0, 200)}`);
+      continue;
+    }
+    if (!res.ok) throw new Error(`Anthropic ${res.status}: ${raw.slice(0, 300)}`);
+    let data: { content: { text: string }[] };
+    try { data = JSON.parse(raw); } catch (_) {
+      if (attempt === retries) throw new Error(`Anthropic non-JSON: ${raw.slice(0, 200)}`);
+      continue;
+    }
+    return data.content[0].text;
+  }
+  throw new Error('Anthropic: all retries exhausted');
 }
 
-// callClaudeJSON: pre-fills assistant with '{' to guarantee pure JSON output from Opus.
-// The model is forced to continue from '{' so it can never prepend markdown/HTML/comments.
+async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-opus-4-5'): Promise<string> {
+  return anthropicFetch({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }, apiKey);
+}
+
+// callClaudeJSON: pre-fills assistant turn with '{' — model can never prepend markdown/HTML.
 async function callClaudeJSON(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-opus-4-5'): Promise<string> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model, max_tokens: maxTokens,
-      system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
-      messages: [
-        { role: 'user', content: user },
-        { role: 'assistant', content: '{' },  // pre-fill forces pure JSON
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`Anthropic error: ${await res.text()}`);
-  // Response continues from '{', so prepend it back
-  return '{' + (await res.json()).content[0].text;
+  const text = await anthropicFetch({
+    model, max_tokens: maxTokens,
+    system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
+    messages: [{ role: 'user', content: user }, { role: 'assistant', content: '{' }],
+  }, apiKey);
+  return '{' + text;
 }
 
 function parseJSON(text: string) {

@@ -4,17 +4,27 @@ import { getIndustrySections } from "./designLibrary.ts";
 const MINI_APP_URL = 'https://untitled-app-37d87fa3.base44.app';
 
 async function callClaude(apiKey: string, system: string, user: string): Promise<string> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-opus-4-5', max_tokens: 6000,
-      system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
-      messages: [{ role: 'user', content: user }, { role: 'assistant', content: '{' }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Claude error: ${await res.text()}`);
-  return '{' + (await res.json()).content[0].text;
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
+    let res: Response;
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-opus-4-5', max_tokens: 6000,
+          system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
+          messages: [{ role: 'user', content: user }, { role: 'assistant', content: '{' }],
+        }),
+        signal: AbortSignal.timeout(90000),
+      });
+    } catch (e) { if (attempt === 2) throw e; continue; }
+    const raw = await res.text();
+    if (raw.trimStart().startsWith('<')) { if (attempt === 2) throw new Error(`HTML response: ${raw.slice(0,200)}`); continue; }
+    if (!res.ok) throw new Error(`Claude error ${res.status}: ${raw.slice(0,300)}`);
+    return '{' + JSON.parse(raw).content[0].text;
+  }
+  throw new Error('All retries exhausted');
 }
 
 function parseJSON(text: string) {
