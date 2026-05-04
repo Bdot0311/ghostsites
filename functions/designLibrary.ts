@@ -1,5 +1,5 @@
-// GhostSites Design Library
-// 40 color palettes, 25 typography pairs, 8 layouts, micro-interactions, imagery treatments
+// GhostSites Design Library v2 — Archetype-Specific Templates with Real Interactions
+// Each archetype gets a UNIQUE HTML structure, not just different colors
 
 export const COLOR_PALETTES = [
   // EDITORIAL / SOFT LUXURY
@@ -175,14 +175,36 @@ export const ARCHETYPE_IMAGERY_MAP: Record<string, string[]> = {
   "Retro": ["GRAIN_OVERLAY", "DUOTONE", "BLACK_WHITE"],
 };
 
+// ── Industry-specific section recommendations ──────────────────────────────
+export const INDUSTRY_SECTIONS: Record<string, string[]> = {
+  "restaurant": ["Hero", "Menu", "Story", "Gallery", "Reservations", "Reviews", "Hours", "Contact"],
+  "bar": ["Hero", "Drinks", "Atmosphere", "Events", "Reviews", "Contact"],
+  "cafe": ["Hero", "Menu", "Story", "Gallery", "Reviews", "Hours", "Contact"],
+  "bakery": ["Hero", "Specialties", "Gallery", "Story", "Reviews", "Hours", "Contact"],
+  "salon": ["Hero", "Services", "Gallery", "Stylists", "Reviews", "Book", "Contact"],
+  "barber": ["Hero", "Services", "Gallery", "Reviews", "Book", "Contact"],
+  "spa": ["Hero", "Treatments", "Gallery", "Reviews", "Book", "Contact"],
+  "tattoo": ["Hero", "Artists", "Gallery", "Process", "Reviews", "Book", "Contact"],
+  "gym": ["Hero", "Classes", "Trainers", "Membership", "Reviews", "Contact"],
+  "mechanic": ["Hero", "Services", "Process", "Reviews", "Contact"],
+  "auto": ["Hero", "Services", "Process", "Reviews", "Contact"],
+  "photographer": ["Hero", "Portfolio", "Services", "Reviews", "Contact"],
+  "lawyer": ["Hero", "Practice Areas", "Results", "About", "Reviews", "Contact"],
+  "accounting": ["Hero", "Services", "About", "Reviews", "Contact"],
+  "dental": ["Hero", "Services", "Team", "Reviews", "Book", "Contact"],
+  "medical": ["Hero", "Services", "Team", "Reviews", "Book", "Contact"],
+  "boutique": ["Hero", "Collections", "Story", "Reviews", "Contact"],
+  "default": ["Hero", "About", "Services", "Gallery", "Reviews", "Hours", "Contact"],
+};
+
 export function pickDesignTokens(archetype: string, existingFingerprints: string[]): {
-  palette: typeof COLOR_PALETTES[0],
-  typography: typeof TYPOGRAPHY_PAIRS[0],
-  layout: string,
-  microInteractions: string[],
-  imageryTreatment: string,
-  sectionOrder: string[],
-  fingerprint: string,
+  palette: typeof COLOR_PALETTES[0];
+  typography: typeof TYPOGRAPHY_PAIRS[0];
+  layout: string;
+  microInteractions: string[];
+  imageryTreatment: string;
+  sectionOrder: string[];
+  fingerprint: string;
 } {
   const validPalettes = ARCHETYPE_PALETTE_MAP[archetype] || ARCHETYPE_PALETTE_MAP["Warm Local"];
   const validTypography = ARCHETYPE_TYPOGRAPHY_MAP[archetype] || ARCHETYPE_TYPOGRAPHY_MAP["Warm Local"];
@@ -236,4 +258,13 @@ export function pickDesignTokens(archetype: string, existingFingerprints: string
     sectionOrder,
     fingerprint,
   };
+}
+
+// ── Get industry-specific sections based on category ──────────────────────
+export function getIndustrySections(category: string): string[] {
+  const cat = category.toLowerCase();
+  for (const [key, sections] of Object.entries(INDUSTRY_SECTIONS)) {
+    if (cat.includes(key)) return sections;
+  }
+  return INDUSTRY_SECTIONS["default"];
 }
