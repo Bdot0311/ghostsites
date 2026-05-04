@@ -4,7 +4,7 @@ async function callClaude(apiKey: string, system: string, user: string): Promise
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 800, system, messages: [{ role: 'user', content: user }] }),
+    body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 800, system, messages: [{ role: 'user', content: user }] }),
   });
   if (!res.ok) throw new Error(`Claude error: ${await res.text()}`);
   return (await res.json()).content[0].text;

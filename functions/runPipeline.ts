@@ -5,7 +5,7 @@ const MINI_APP_URL = 'https://untitled-app-37d87fa3.base44.app';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-haiku-4-5'): Promise<string> {
+async function callClaude(apiKey: string, system: string, user: string, maxTokens = 1000, model = 'claude-opus-4-5'): Promise<string> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -943,7 +943,7 @@ JSON: {"personality_keywords":["a","b","c","d","e"],"design_archetype":"Classic"
 Rating: ${business.rating || 'N/A'} (${business.review_count || 0} reviews)
 Reviews:\n${reviewsText || 'None'}`;
 
-  const profile = parseJSON(await callClaude(apiKey, system, user, 800, 'claude-haiku-4-5'));
+  const profile = parseJSON(await callClaude(apiKey, system, user, 800, 'claude-opus-4-5'));
   await db.Business.update(business.id, { personality_profile: profile });
   return profile;
 }
@@ -1117,7 +1117,7 @@ Return JSON:
     {"name":"specific service name","desc":"1-2 sentence description using industry terms","price":"$XX–$XX or 'Call for pricing'","icon":"emoji"},
     {"name":"specific service name","desc":"1-2 sentence description using industry terms","price":"$XX–$XX or 'Call for pricing'","icon":"emoji"}
   ]
-}`, 2000, 'claude-haiku-4-5');
+}`, 2000, 'claude-opus-4-5');
 
   const copy = parseJSON(copyJson);
 
@@ -1173,7 +1173,7 @@ STRICT 4-point structure (80-95 words total — SHORT and punchy):
 Start the email with: "${greeting},"
 Sign off: — Alex
 
-Subject line: ≤6 words, lowercase, feels written for ${business.name} specifically. Reference their category or a detail from reviews.`, 900, 'claude-haiku-4-5'));
+Subject line: ≤6 words, lowercase, feels written for ${business.name} specifically. Reference their category or a detail from reviews.`, 900, 'claude-opus-4-5'));
 
   const campaign = await db.EmailCampaign.create({
     business_id: business.id, site_id: site.site_id,
