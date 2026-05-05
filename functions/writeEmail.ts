@@ -12,7 +12,7 @@ async function callClaude(apiKey: string, system: string, user: string): Promise
           system: system + '\n\nOutput raw JSON only. No markdown. No code fences. No explanation.',
           messages:[{role:'user',content:user},{role:'assistant',content:'{'}],
         }),
-        signal: AbortSignal.timeout(90000),
+        signal: AbortSignal.timeout(90000), // signal goes in fetch options, not body
       });
     } catch (e) { if (attempt === 2) throw e; continue; }
     const raw = await res.text();

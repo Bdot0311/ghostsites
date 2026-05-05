@@ -1244,12 +1244,21 @@ Deno.serve(async (req) => {
 
     // ── Single business mode ──────────────────────────────────────────────────
     if (business_id) {
-      const business = await db.Business.get(business_id);
-      if (!business) return Response.json({ error: 'Business not found' }, { status: 404 });
-      const profile = await analyzePersonality(business, apiKey, db);
-      const site = await generateSite(business, profile, apiKey, db);
-      const email = await writeEmail(business, profile, site, apiKey, db);
-      return Response.json({ success: true, business_id, site, email });
+      let step = 'loading business';
+      try {
+        const business = await db.Business.get(business_id);
+        if (!business) return Response.json({ error: 'Business not found' }, { status: 404 });
+        step = 'analyzePersonality';
+        const profile = await analyzePersonality(business, apiKey, db);
+        step = 'generateSite';
+        const site = await generateSite(business, profile, apiKey, db);
+        step = 'writeEmail';
+        const email = await writeEmail(business, profile, site, apiKey, db);
+        return Response.json({ success: true, business_id, site, email });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return Response.json({ error: `[${step}] ${msg}` }, { status: 500 });
+      }
     }
 
     // ── Campaign mode ─────────────────────────────────────────────────────────
@@ -1282,7 +1291,9 @@ Deno.serve(async (req) => {
         await db.Campaign.update(campaign.id, { status: 'error', error_message: `Places API: ${e}` });
         return Response.json({ error: `Places API error: ${e}` }, { status: 500 });
       }
-      const d = await r.json();
+      const rawPlaces = await r.text();
+      if (rawPlaces.trimStart().startsWith('<')) throw new Error(`Places API returned HTML: ${rawPlaces.slice(0, 200)}`);
+      const d = JSON.parse(rawPlaces);
       if (d.places) allPlaces.push(...d.places);
       nextToken = d.nextPageToken;
       pg++;
