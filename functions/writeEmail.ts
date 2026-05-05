@@ -18,16 +18,29 @@ async function callClaude(apiKey: string, system: string, user: string): Promise
     const raw = await res.text();
     if (raw.trimStart().startsWith('<')) { if (attempt === 2) throw new Error(`HTML response: ${raw.slice(0,200)}`); continue; }
     if (!res.ok) throw new Error(`Claude error ${res.status}: ${raw.slice(0,300)}`);
-    return '{' + JSON.parse(raw).content[0].text;
+    let data: { content: { text: string }[] };
+    try { data = JSON.parse(raw); } catch (_) {
+      if (attempt === 2) throw new Error(`Claude returned non-JSON: ${raw.slice(0,200)}`);
+      continue;
+    }
+    const text = stripHtmlComments(data?.content?.[0]?.text ?? '').trim();
+    if (!text) throw new Error('Claude returned empty text');
+    if (text.trimStart().startsWith('<')) { if (attempt === 2) throw new Error(`Claude returned HTML text: ${text.slice(0,200)}`); continue; }
+    return '{' + text;
   }
   throw new Error('All retries exhausted');
 }
 function parseJSON(t: string) {
-  const clean = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').replace(/<!--[\s\S]*?-->/g, '').trim();
+  const clean = stripHtmlComments(t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')).trim();
+  if (!clean) throw new Error(`No JSON returned. Raw: ${t.slice(0, 200)}`);
+  if (clean.trimStart().startsWith('<')) throw new Error(`Expected JSON but got HTML. Raw: ${t.slice(0, 200)}`);
   try { return JSON.parse(clean); } catch (_) {}
   const m = clean.match(/\{[\s\S]*\}/);
   if (m) { try { return JSON.parse(m[0]); } catch (_) {} }
   throw new Error(`No valid JSON. Raw: ${t.slice(0, 200)}`);
+}
+function stripHtmlComments(text: string): string {
+  return text.replace(/^\s*(?:<!--[\s\S]*?-->\s*)+/g, '').replace(/<!--[\s\S]*?-->/g, '');
 }
 
 Deno.serve(async (req) => {

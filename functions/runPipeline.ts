@@ -34,7 +34,15 @@ async function anthropicFetch(payload: Record<string, unknown>, apiKey: string, 
       if (attempt === retries) throw new Error(`Anthropic non-JSON: ${raw.slice(0, 200)}`);
       continue;
     }
-    return data.content[0].text;
+    const text = data?.content?.[0]?.text;
+    if (typeof text !== 'string') throw new Error(`Anthropic response missing text: ${raw.slice(0, 200)}`);
+    const cleanedText = stripHtmlComments(text).trim();
+    if (!cleanedText) throw new Error('Anthropic returned empty text');
+    if (cleanedText.trimStart().startsWith('<')) {
+      if (attempt === retries) throw new Error(`Anthropic returned HTML text (${res.status}): ${cleanedText.slice(0, 200)}`);
+      continue;
+    }
+    return cleanedText;
   }
   throw new Error('Anthropic: all retries exhausted');
 }
@@ -57,7 +65,9 @@ function parseJSON(text: string) {
   // Strip markdown code fences
   let t = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
   // Strip leading HTML comments
-  t = t.replace(/<!--[\s\S]*?-->/g, '').trim();
+  t = stripHtmlComments(t).trim();
+  if (!t) throw new Error(`No JSON returned. Raw: ${text.slice(0, 200)}`);
+  if (t.trimStart().startsWith('<')) throw new Error(`Expected JSON but got HTML. Raw: ${text.slice(0, 200)}`);
   // Try the full cleaned string first
   try { return JSON.parse(t); } catch (_) { /* fall through */ }
   // Greedy: first { to last }
@@ -67,6 +77,10 @@ function parseJSON(text: string) {
   const blocks = [...t.matchAll(/\{[^{}]*\}/g)].reverse();
   for (const m of blocks) { try { return JSON.parse(m[0]); } catch (_) {} }
   throw new Error(`No valid JSON in Claude response. Raw: ${text.slice(0, 200)}`);
+}
+
+function stripHtmlComments(text: string): string {
+  return text.replace(/^\s*(?:<!--[\s\S]*?-->\s*)+/g, '').replace(/<!--[\s\S]*?-->/g, '');
 }
 
 // Follow the Google Places photo redirect server-side to get the public CDN URL.
