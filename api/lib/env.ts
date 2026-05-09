@@ -13,4 +13,6 @@ export const env = {
   appSecret: required("APP_SECRET"),
   isProduction: process.env.NODE_ENV === "production",
   databaseUrl: required("DATABASE_URL"),
+  openrouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
+  googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY ?? "",
 };

@@ -1,22 +1,75 @@
 import {
   mysqlTable,
-  mysqlEnum,
   serial,
   varchar,
   text,
   timestamp,
-  // bigint,
+  int,
+  json,
+  boolean,
+  bigint,
 } from "drizzle-orm/mysql-core";
 
-// TODO: Add your tables here. See docs/Database.md for schema examples and patterns.
-//
-// Example:
-// export const posts = mysqlTable("posts", {
-//   id: serial("id").primaryKey(),
-//   title: varchar("title", { length: 255 }).notNull(),
-//   content: text("content"),
-//   createdAt: timestamp("created_at").notNull().defaultNow(),
-// });
-//
-// Note: FK columns referencing a serial() PK must use:
-//   bigint("columnName", { mode: "number", unsigned: true }).notNull()
+export const campaigns = mysqlTable("campaigns", {
+  id: serial("id").primaryKey(),
+  query: varchar("query", { length: 255 }).notNull(),
+  city: varchar("city", { length: 100 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("scraping"),
+  businessesFound: int("businesses_found").notNull().default(0),
+  sitesGenerated: int("sites_generated").notNull().default(0),
+  emailsSent: int("emails_sent").notNull().default(0),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const businesses = mysqlTable("businesses", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull(),
+  address: text("address"),
+  city: varchar("city", { length: 100 }).notNull(),
+  state: varchar("state", { length: 50 }),
+  phone: varchar("phone", { length: 50 }),
+  email: varchar("email", { length: 255 }),
+  googlePlaceId: varchar("google_place_id", { length: 255 }).unique(),
+  currentWebsiteUrl: text("current_website_url"),
+  websiteQuality: varchar("website_quality", { length: 50 }),
+  rating: int("rating"),
+  reviewCount: int("review_count"),
+  topReviews: json("top_reviews").$type<{ author: string; text: string; rating: number }[]>(),
+  photos: json("photos").$type<string[]>(),
+  hours: text("hours"),
+  ownerName: varchar("owner_name", { length: 255 }),
+  personalityProfile: json("personality_profile"),
+  status: varchar("status", { length: 50 }).notNull().default("scraped"),
+  campaignId: bigint("campaign_id", { mode: "number", unsigned: true }),
+  campaignQuery: varchar("campaign_query", { length: 255 }),
+  unsubscribed: boolean("unsubscribed").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const generatedSites = mysqlTable("generated_sites", {
+  id: serial("id").primaryKey(),
+  businessId: bigint("business_id", { mode: "number", unsigned: true }).notNull(),
+  fullHtml: text("full_html").notNull(),
+  subdomainUrl: varchar("subdomain_url", { length: 500 }),
+  designArchetype: varchar("design_archetype", { length: 100 }),
+  heroCopy: text("hero_copy"),
+  aboutCopy: text("about_copy"),
+  servicesCopy: text("services_copy"),
+  ctaCopy: text("cta_copy"),
+  viewCount: int("view_count").notNull().default(0),
+  generatedAt: timestamp("generated_at").notNull().defaultNow(),
+});
+
+export const emailCampaigns = mysqlTable("email_campaigns", {
+  id: serial("id").primaryKey(),
+  businessId: bigint("business_id", { mode: "number", unsigned: true }).notNull(),
+  siteId: bigint("site_id", { mode: "number", unsigned: true }),
+  subject: varchar("subject", { length: 500 }),
+  body: text("body"),
+  status: varchar("status", { length: 50 }).notNull().default("draft"),
+  sendAttempts: int("send_attempts").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
