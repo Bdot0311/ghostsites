@@ -8,35 +8,34 @@ import { callKimi } from "../lib/openrouter";
 export const emailRouter = createRouter({
   generate: publicQuery
     .input(z.object({ businessId: z.number() }))
-    .mutation(async ({ input }) => {
-      const bizRows = await getDb()
+    .mutation(async ({ input, ctx }) => {
+      const apiKey = ctx.apiKeys.openrouter;
+      if (!apiKey && !process.env.OPENROUTER_API_KEY) {
+        throw new Error("OpenRouter API key not configured. Add it in Settings.");
+      }
+
+      const db = getDb();
+      const business = db
         .select()
         .from(businesses)
         .where(eq(businesses.id, input.businessId))
-        .limit(1);
+        .get();
 
-      const business = bizRows[0];
       if (!business) throw new Error("Business not found");
 
-      // Get latest generated site
-      const siteRows = await getDb()
+      const site = db
         .select()
         .from(generatedSites)
         .where(eq(generatedSites.businessId, input.businessId))
         .orderBy(desc(generatedSites.generatedAt))
-        .limit(1);
+        .get();
 
-      const site = siteRows[0];
-
-      // Parse personality profile if exists
       let personality: Record<string, unknown> = {};
       try {
         if (business.personalityProfile) {
           personality = JSON.parse(business.personalityProfile as string);
         }
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
 
       const prompt = `You are a cold outreach expert who writes emails that actually get replies. Write a short, punchy email to ${business.name}, a ${business.category} in ${business.city}.
 
@@ -66,6 +65,7 @@ Return ONLY valid JSON:
           temperature: 0.8,
           max_tokens: 1000,
           jsonMode: true,
+          apiKey,
         });
         result = JSON.parse(raw);
       } catch {
@@ -75,24 +75,83 @@ Return ONLY valid JSON:
         };
       }
 
-      // Save email campaign
-      await getDb()
-        .insert(emailCampaigns)
+      const campaign = db.insert(emailCampaigns)
         .values({
           businessId: input.businessId,
           siteId: site?.id ?? null,
           subject: result.subject,
           body: result.body,
           status: "draft",
-        });
+        })
+        .returning()
+        .get();
 
-      // Update business status
-      await getDb()
-        .update(businesses)
+      db.update(businesses)
         .set({ status: "email_ready" })
-        .where(eq(businesses.id, input.businessId));
+        .where(eq(businesses.id, input.businessId))
+        .run();
 
-      return result;
+      return { ...result, emailId: campaign.id };
+    }),
+
+  // Send email via user's connected platform
+  send: publicQuery
+    .input(z.object({ emailId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const apiUrl = ctx.apiKeys.emailApiUrl;
+      if (!apiUrl) {
+        throw new Error("No email sending platform configured. Add your API URL in Settings.");
+      }
+
+      const db = getDb();
+      const email = db
+        .select()
+        .from(emailCampaigns)
+        .where(eq(emailCampaigns.id, input.emailId))
+        .get();
+
+      if (!email) throw new Error("Email not found");
+
+      const business = db
+        .select()
+        .from(businesses)
+        .where(eq(businesses.id, email.businessId))
+        .get();
+
+      if (!business) throw new Error("Business not found");
+
+      // POST to user's email platform
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: business.email || business.name,
+          subject: email.subject,
+          body: email.body,
+          businessId: business.id,
+          businessName: business.name,
+          businessCategory: business.category,
+          businessCity: business.city,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Email platform returned ${res.status}: ${text.slice(0, 200)}`);
+      }
+
+      // Mark as sent
+      db.update(emailCampaigns)
+        .set({ status: "sent", sentAt: new Date() })
+        .where(eq(emailCampaigns.id, input.emailId))
+        .run();
+
+      db.update(businesses)
+        .set({ status: "email_sent" })
+        .where(eq(businesses.id, email.businessId))
+        .run();
+
+      return { success: true, status: res.status };
     }),
 
   list: publicQuery
@@ -101,21 +160,21 @@ Return ONLY valid JSON:
         businessId: z.number().optional(),
         limit: z.number().min(1).max(100).default(20),
         offset: z.number().min(0).default(0),
-      }).optional(),
+      }),
     )
     .query(async ({ input }) => {
-      const params = input ?? { limit: 20, offset: 0 };
-      const limit = params.limit ?? 20;
-      const offset = params.offset ?? 0;
+      const limit = input.limit ?? 20;
+      const offset = input.offset ?? 0;
 
-      if (params.businessId) {
+      if (input.businessId) {
         return getDb()
           .select()
           .from(emailCampaigns)
-          .where(eq(emailCampaigns.businessId, params.businessId))
+          .where(eq(emailCampaigns.businessId, input.businessId))
           .orderBy(desc(emailCampaigns.createdAt))
           .limit(limit)
-          .offset(offset);
+          .offset(offset)
+          .all();
       }
 
       return getDb()
@@ -123,7 +182,8 @@ Return ONLY valid JSON:
         .from(emailCampaigns)
         .orderBy(desc(emailCampaigns.createdAt))
         .limit(limit)
-        .offset(offset);
+        .offset(offset)
+        .all();
     }),
 
   updateStatus: publicQuery
@@ -134,22 +194,11 @@ Return ONLY valid JSON:
       }),
     )
     .mutation(async ({ input }) => {
-      await getDb()
+      getDb()
         .update(emailCampaigns)
         .set({ status: input.status })
-        .where(eq(emailCampaigns.id, input.id));
-
-      return { success: true };
-    }),
-
-  unsubscribe: publicQuery
-    .input(z.object({ businessId: z.number() }))
-    .mutation(async ({ input }) => {
-      await getDb()
-        .update(businesses)
-        .set({ unsubscribed: true })
-        .where(eq(businesses.id, input.businessId));
-
+        .where(eq(emailCampaigns.id, input.id))
+        .run();
       return { success: true };
     }),
 });

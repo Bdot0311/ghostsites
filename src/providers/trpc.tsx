@@ -13,6 +13,25 @@ const trpcClient = trpc.createClient({
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      headers() {
+        const keysRaw = localStorage.getItem("ghostsites_api_keys");
+        const headers: Record<string, string> = {};
+        if (keysRaw) {
+          try {
+            const keys = JSON.parse(keysRaw) as {
+              openrouter?: string;
+              googlePlaces?: string;
+              emailApiUrl?: string;
+            };
+            if (keys.openrouter) headers["x-openrouter-key"] = keys.openrouter;
+            if (keys.googlePlaces) headers["x-google-places-key"] = keys.googlePlaces;
+            if (keys.emailApiUrl) headers["x-email-api-url"] = keys.emailApiUrl;
+          } catch {
+            // ignore
+          }
+        }
+        return headers;
+      },
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),

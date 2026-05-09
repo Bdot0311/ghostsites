@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { trpc } from "@/providers/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
@@ -26,7 +26,12 @@ import {
   Trash2,
   MapPin,
   Star,
+  Settings,
+  Download,
+  ExternalLink,
+  X,
 } from "lucide-react";
+import { Link } from "react-router";
 
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -34,7 +39,11 @@ export default function Dashboard() {
   const [searchCategory, setSearchCategory] = useState("");
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
-  const [emailPreview, setEmailPreview] = useState<{ subject: string; body: string } | null>(null);
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; body: string; emailId?: number } | null>(null);
+  const emailApiUrl = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("ghostsites_api_keys") || "{}").emailApiUrl as string | undefined; }
+    catch { return undefined; }
+  }, []);
   const [activeTab, setActiveTab] = useState("leads");
 
   const utils = trpc.useUtils();
@@ -68,17 +77,46 @@ export default function Dashboard() {
     onError: (err) => toast.error(err.message),
   });
 
+  const sendEmailMutation = trpc.email.send.useMutation({
+    onSuccess: () => {
+      toast.success("Email sent via your platform!");
+      setEmailPreview(null);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const generateEmailMutation = trpc.email.generate.useMutation({
     onSuccess: (data) => {
       toast.success("Email generated!");
       setEmailPreview(data);
       utils.business.list.invalidate();
+      utils.email.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
   });
 
   const analyzePersonalityMutation = trpc.site.analyzePersonality.useMutation({
     onSuccess: () => toast.success("Personality analyzed!"),
+    onError: (err) => toast.error(err.message),
+  });
+
+  const exportZipMutation = trpc.site.exportZip.useMutation({
+    onSuccess: (data) => {
+      // Trigger file download
+      const byteChars = atob(data.base64);
+      const byteNums = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([new Uint8Array(byteNums)], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Site ZIP downloaded!");
+    },
     onError: (err) => toast.error(err.message),
   });
 
@@ -145,8 +183,16 @@ export default function Dashboard() {
               <p className="text-xs text-muted-foreground">AI mockup generator for local businesses</p>
             </div>
           </div>
-          <div className="text-sm text-muted-foreground">
-            {stats?.totalBusinesses ?? 0} businesses found
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">
+              {stats?.totalBusinesses ?? 0} businesses found
+            </span>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/settings" className="flex items-center gap-1">
+                <Settings className="w-3.5 h-3.5" />
+                Keys
+              </Link>
+            </Button>
           </div>
         </div>
       </header>
@@ -312,6 +358,39 @@ export default function Dashboard() {
                             Generate Site
                           </Button>
 
+                          {/* Show these only when site exists */}
+                          {(biz.status === "site_generated" || biz.status === "email_ready" || biz.status === "email_sent") && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => exportZipMutation.mutate({ businessId: biz.id })}
+                                disabled={exportZipMutation.isPending}
+                              >
+                                {exportZipMutation.isPending ? (
+                                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                ) : (
+                                  <Download className="w-3.5 h-3.5 mr-1" />
+                                )}
+                                Export ZIP
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                asChild
+                              >
+                                <a
+                                  href={`/preview/business/${biz.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                                  Live Preview
+                                </a>
+                              </Button>
+                            </>
+                          )}
+
                           <Button
                             variant="outline"
                             size="sm"
@@ -388,23 +467,27 @@ export default function Dashboard() {
         open={!!previewHtml}
         onOpenChange={() => setPreviewHtml(null)}
       >
-        <DialogContent className="max-w-5xl w-[95vw] h-[90vh] p-0">
-          <DialogHeader className="px-4 pt-4 pb-2">
-            <DialogTitle className="flex items-center gap-2">
+        <DialogContent className="!max-w-[100vw] !w-[100vw] !h-[100vh] !p-0 !m-0 !rounded-none !border-0 data-[state=open]:!zoom-in-100">
+          <DialogHeader className="px-4 py-3 bg-neutral-900 text-white flex flex-row items-center justify-between">
+            <DialogTitle className="flex items-center gap-2 text-white text-sm font-medium">
               <Eye className="w-4 h-4" />
               Preview — {previewName}
             </DialogTitle>
+            <button
+              onClick={() => setPreviewHtml(null)}
+              className="text-white/60 hover:text-white transition-colors p-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </DialogHeader>
-          <ScrollArea className="flex-1 h-full px-4 pb-4">
-            {previewHtml && (
-              <iframe
-                srcDoc={previewHtml}
-                title="Site Preview"
-                className="w-full h-[calc(90vh-60px)] border rounded-lg"
-                sandbox="allow-scripts"
-              />
-            )}
-          </ScrollArea>
+          {previewHtml && (
+            <iframe
+              srcDoc={previewHtml}
+              title="Site Preview"
+              className="w-full h-[calc(100vh-48px)] bg-white"
+              sandbox="allow-scripts"
+            />
+          )}
         </DialogContent>
       </Dialog>
 
@@ -437,19 +520,40 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    navigator.clipboard.writeText(
-                      `Subject: ${emailPreview.subject}\n\n${emailPreview.body}`
-                    );
-                    toast.success("Copied to clipboard");
-                  }}
-                >
-                  <Send className="w-3.5 h-3.5 mr-1" />
-                  Copy
-                </Button>
+                {emailApiUrl ? (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (emailPreview.emailId) {
+                        sendEmailMutation.mutate({ emailId: emailPreview.emailId });
+                      } else {
+                        toast.error("No email ID found");
+                      }
+                    }}
+                    disabled={sendEmailMutation.isPending}
+                  >
+                    {sendEmailMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5 mr-1" />
+                    )}
+                    Send via Platform
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(
+                        `Subject: ${emailPreview.subject}\n\n${emailPreview.body}`
+                      );
+                      toast.success("Copied to clipboard");
+                    }}
+                  >
+                    <Send className="w-3.5 h-3.5 mr-1" />
+                    Copy
+                  </Button>
+                )}
               </div>
             </div>
           )}

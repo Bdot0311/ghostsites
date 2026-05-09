@@ -1,6 +1,5 @@
 import { env } from "./env";
 
-const OPENROUTER_API_KEY = env.openrouterApiKey;
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "moonshotai/kimi-latest";
 
@@ -11,12 +10,22 @@ export interface KimiMessage {
 
 export async function callKimi(
   messages: KimiMessage[],
-  opts: { temperature?: number; max_tokens?: number; jsonMode?: boolean } = {},
+  opts: {
+    temperature?: number;
+    max_tokens?: number;
+    jsonMode?: boolean;
+    apiKey?: string;
+  } = {},
 ): Promise<string> {
-  const { temperature = 0.7, max_tokens = 4000, jsonMode = false } = opts;
+  const { temperature = 0.7, max_tokens = 4000, jsonMode = false, apiKey } = opts;
 
-  if (!OPENROUTER_API_KEY) {
-    throw new Error("OPENROUTER_API_KEY not configured");
+  // Use per-request key, then env key
+  const key = apiKey || env.openrouterApiKey;
+
+  if (!key) {
+    throw new Error(
+      "OpenRouter API key not configured. Add it in Settings or set OPENROUTER_API_KEY env var.",
+    );
   }
 
   const body: Record<string, unknown> = {
@@ -34,7 +43,7 @@ export async function callKimi(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${key}`,
       "HTTP-Referer": "https://ghostsites.app",
       "X-Title": "GhostSites",
     },

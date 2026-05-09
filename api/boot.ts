@@ -5,16 +5,38 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env } from "./lib/env";
+import { getDb } from "./queries/connection";
+import { generatedSites } from "@db/schema";
+import { eq, desc } from "drizzle-orm";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
+
+// Live preview — serve generated site by business ID (latest)
+app.get("/preview/business/:businessId", async (c) => {
+  const businessId = parseInt(c.req.param("businessId"));
+  if (isNaN(businessId)) return c.text("Invalid business ID", 400);
+
+  const site = getDb()
+    .select()
+    .from(generatedSites)
+    .where(eq(generatedSites.businessId, businessId))
+    .orderBy(desc(generatedSites.generatedAt))
+    .get();
+
+  if (!site) return c.text("No site found for this business. Generate one first.", 404);
+
+  c.header("Content-Type", "text/html");
+  return c.body(site.fullHtml);
+});
+
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
     endpoint: "/api/trpc",
     req: c.req.raw,
     router: appRouter,
-    createContext,
+    createContext: (opts) => createContext(opts),
   });
 });
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));

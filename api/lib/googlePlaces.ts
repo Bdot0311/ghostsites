@@ -1,6 +1,5 @@
 import { env } from "./env";
 
-const GOOGLE_PLACES_API_KEY = env.googlePlacesApiKey;
 const BASE_URL = "https://maps.googleapis.com/maps/api/place";
 
 export interface PlaceResult {
@@ -34,7 +33,11 @@ export async function searchPlaces(
   query: string,
   city: string,
   maxResults: number = 20,
+  apiKey?: string,
 ): Promise<PlaceResult[]> {
+  // Use per-request key, then env key
+  const GOOGLE_PLACES_API_KEY = apiKey || env.googlePlacesApiKey;
+
   if (!GOOGLE_PLACES_API_KEY) {
     // Return mock data if no API key
     return generateMockPlaces(query, city);

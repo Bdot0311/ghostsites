@@ -15,9 +15,11 @@ export const scrapeRouter = createRouter({
         maxResults: z.number().min(1).max(50).default(20),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const db = getDb();
+
       // 1. Create campaign
-      const [campaign] = await getDb()
+      const result = db
         .insert(campaigns)
         .values({
           query: input.query,
@@ -25,12 +27,18 @@ export const scrapeRouter = createRouter({
           category: input.category,
           status: "scraping",
         })
-        .$returningId();
+        .returning()
+        .get();
 
-      const campaignId = campaign.id;
+      const campaignId = result.id;
 
-      // 2. Scrape Google Places
-      const places = await searchPlaces(input.query, input.city, input.maxResults);
+      // 2. Scrape Google Places (use user's key if provided)
+      const places = await searchPlaces(
+        input.query,
+        input.city,
+        input.maxResults,
+        ctx.apiKeys.googlePlaces,
+      );
 
       // 3. Filter for businesses with poor/no websites
       const filtered = places.filter((place) => {
@@ -42,25 +50,23 @@ export const scrapeRouter = createRouter({
       let inserted = 0;
       for (const place of filtered) {
         try {
-          await getDb()
-            .insert(businesses)
+          db.insert(businesses)
             .values({
               name: place.name,
               category: input.category,
               address: place.formatted_address ?? place.vicinity ?? "",
               city: input.city,
               phone: place.formatted_phone_number ?? "",
-              googlePlaceId: place.place_id,
-              currentWebsiteUrl: place.website,
+              websiteUrl: place.website,
               websiteQuality: assessWebsiteQuality(place.website),
               rating: place.rating ? Math.round(place.rating) : null,
               reviewCount: place.user_ratings_total ?? 0,
               photos: place.photos?.map((p) => p.photo_reference) ?? [],
               hours: place.opening_hours?.weekday_text?.join("\n") ?? "",
               campaignId: campaignId,
-              campaignQuery: input.query,
               status: "scraped",
-            });
+            })
+            .run();
           inserted++;
         } catch (err) {
           console.warn("Failed to insert business:", place.name, err);
@@ -68,16 +74,13 @@ export const scrapeRouter = createRouter({
       }
 
       // 5. Update campaign
-      await getDb()
-        .update(campaigns)
-        .set({
-          status: "completed",
-          businessesFound: inserted,
-        })
-        .where(eq(campaigns.id, campaignId as number));
+      db.update(campaigns)
+        .set({ status: "completed", businessesFound: inserted })
+        .where(eq(campaigns.id, campaignId))
+        .run();
 
       return {
-        campaignId: campaignId as number,
+        campaignId,
         totalFound: places.length,
         filteredCount: filtered.length,
         inserted,
@@ -87,26 +90,22 @@ export const scrapeRouter = createRouter({
   status: publicQuery
     .input(z.object({ campaignId: z.number() }))
     .query(async ({ input }) => {
-      const rows = await getDb()
+      return getDb()
         .select()
         .from(campaigns)
         .where(eq(campaigns.id, input.campaignId))
-        .limit(1);
-      return rows[0] ?? null;
+        .get() ?? null;
     }),
 
   listCampaigns: publicQuery.query(async () => {
-    return getDb()
-      .select()
-      .from(campaigns)
-      .orderBy(campaigns.createdAt);
+    return getDb().select().from(campaigns).all();
   }),
 
   deleteCampaign: publicQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
-      await getDb().delete(businesses).where(eq(businesses.campaignId, input.id));
-      await getDb().delete(campaigns).where(eq(campaigns.id, input.id));
+      getDb().delete(businesses).where(eq(businesses.campaignId, input.id)).run();
+      getDb().delete(campaigns).where(eq(campaigns.id, input.id)).run();
       return { success: true };
     }),
 });

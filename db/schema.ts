@@ -1,75 +1,62 @@
-import {
-  mysqlTable,
-  serial,
-  varchar,
-  text,
-  timestamp,
-  int,
-  json,
-  boolean,
-  bigint,
-} from "drizzle-orm/mysql-core";
+import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
 
-export const campaigns = mysqlTable("campaigns", {
-  id: serial("id").primaryKey(),
-  query: varchar("query", { length: 255 }).notNull(),
-  city: varchar("city", { length: 100 }).notNull(),
-  category: varchar("category", { length: 100 }).notNull(),
-  status: varchar("status", { length: 50 }).notNull().default("scraping"),
-  businessesFound: int("businesses_found").notNull().default(0),
-  sitesGenerated: int("sites_generated").notNull().default(0),
-  emailsSent: int("emails_sent").notNull().default(0),
-  errorMessage: text("error_message"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+export const campaigns = sqliteTable("campaigns", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  query: text("query").notNull(),
+  city: text("city").notNull(),
+  category: text("category").notNull(),
+  status: text("status").default("pending").notNull(),
+  businessesFound: integer("businesses_found", { mode: "number" }).default(0),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date()),
 });
 
-export const businesses = mysqlTable("businesses", {
-  id: serial("id").primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
-  category: varchar("category", { length: 100 }).notNull(),
+export const businesses = sqliteTable("businesses", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
   address: text("address"),
-  city: varchar("city", { length: 100 }).notNull(),
-  state: varchar("state", { length: 50 }),
-  phone: varchar("phone", { length: 50 }),
-  email: varchar("email", { length: 255 }),
-  googlePlaceId: varchar("google_place_id", { length: 255 }).unique(),
-  currentWebsiteUrl: text("current_website_url"),
-  websiteQuality: varchar("website_quality", { length: 50 }),
-  rating: int("rating"),
-  reviewCount: int("review_count"),
-  topReviews: json("top_reviews").$type<{ author: string; text: string; rating: number }[]>(),
-  photos: json("photos").$type<string[]>(),
+  city: text("city").notNull(),
+  phone: text("phone"),
+  email: text("email"),
+  websiteUrl: text("website_url"),
+  websiteQuality: text("website_quality"),
+  description: text("description"),
   hours: text("hours"),
-  ownerName: varchar("owner_name", { length: 255 }),
-  personalityProfile: json("personality_profile"),
-  status: varchar("status", { length: 50 }).notNull().default("scraped"),
-  campaignId: bigint("campaign_id", { mode: "number", unsigned: true }),
-  campaignQuery: varchar("campaign_query", { length: 255 }),
-  unsubscribed: boolean("unsubscribed").notNull().default(false),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  rating: integer("rating", { mode: "number" }),
+  reviewCount: integer("review_count", { mode: "number" }),
+  photos: text("photos", { mode: "json" }),
+  personalityProfile: text("personality_profile", { mode: "json" }),
+  status: text("status").default("scraped").notNull(),
+  campaignId: integer("campaign_id", { mode: "number" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date()),
 });
 
-export const generatedSites = mysqlTable("generated_sites", {
-  id: serial("id").primaryKey(),
-  businessId: bigint("business_id", { mode: "number", unsigned: true }).notNull(),
+export const generatedSites = sqliteTable("generated_sites", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  businessId: integer("business_id", { mode: "number" }).notNull(),
   fullHtml: text("full_html").notNull(),
-  subdomainUrl: varchar("subdomain_url", { length: 500 }),
-  designArchetype: varchar("design_archetype", { length: 100 }),
+  modularHtml: text("modular_html"),
+  css: text("css"),
+  readme: text("readme"),
+  designArchetype: text("design_archetype"),
   heroCopy: text("hero_copy"),
   aboutCopy: text("about_copy"),
   servicesCopy: text("services_copy"),
   ctaCopy: text("cta_copy"),
-  viewCount: int("view_count").notNull().default(0),
-  generatedAt: timestamp("generated_at").notNull().defaultNow(),
+  generatedAt: integer("generated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date()),
 });
 
-export const emailCampaigns = mysqlTable("email_campaigns", {
-  id: serial("id").primaryKey(),
-  businessId: bigint("business_id", { mode: "number", unsigned: true }).notNull(),
-  siteId: bigint("site_id", { mode: "number", unsigned: true }),
-  subject: varchar("subject", { length: 500 }),
-  body: text("body"),
-  status: varchar("status", { length: 50 }).notNull().default("draft"),
-  sendAttempts: int("send_attempts").notNull().default(0),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+export const emailCampaigns = sqliteTable("email_campaigns", {
+  id: integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+  businessId: integer("business_id", { mode: "number" }).notNull(),
+  siteId: integer("site_id", { mode: "number" }),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  status: text("status").default("draft").notNull(),
+  sentAt: integer("sent_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date()),
 });
