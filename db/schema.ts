@@ -45,6 +45,9 @@ export const generatedSites = sqliteTable("generated_sites", {
   aboutCopy: text("about_copy"),
   servicesCopy: text("services_copy"),
   ctaCopy: text("cta_copy"),
+  // v10 multi-page site fields
+  js: text("js"),
+  pagesJson: text("pages_json"),
   generatedAt: integer("generated_at", { mode: "timestamp" })
     .$defaultFn(() => new Date()),
 });

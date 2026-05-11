@@ -14,6 +14,7 @@ const app = new Hono<{ Bindings: HttpBindings }>();
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 
 // Live preview — serve generated site by business ID (latest)
+// Supports multi-page sites via ?page= parameter
 app.get("/preview/business/:businessId", async (c) => {
   const businessId = parseInt(c.req.param("businessId"));
   if (isNaN(businessId)) return c.text("Invalid business ID", 400);
@@ -27,6 +28,23 @@ app.get("/preview/business/:businessId", async (c) => {
 
   if (!site) return c.text("No site found for this business. Generate one first.", 404);
 
+  const requestedPage = c.req.query("page") || "index.html";
+
+  // Multi-page site
+  if (site.pagesJson) {
+    try {
+      const pages = JSON.parse(site.pagesJson) as { filename: string; html: string }[];
+      const page = pages.find(p => p.filename === requestedPage) || pages[0];
+      if (page) {
+        c.header("Content-Type", "text/html");
+        return c.body(page.html);
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Legacy single-page site
   c.header("Content-Type", "text/html");
   return c.body(site.fullHtml);
 });
